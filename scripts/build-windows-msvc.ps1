@@ -532,7 +532,7 @@ if [ "`$need_libs" = "1" ]; then
       if [ -n "`$zlib_lib" ]; then
         out+=("`$zlib_lib")
       fi
-      out+=("-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
+      out+=("-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32" "-lshell32" "-liphlpapi" "-lucrt" "-lvcruntime" "-lmsvcrt" "-llegacy_stdio_definitions")
       ;;
   esac
 fi
