@@ -350,14 +350,23 @@ export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
-test -x /usr/bin/make
+ls -l /usr/bin/make* || true
+command -v make || true
+if [ -x /usr/bin/make ]; then
+  make_cmd=/usr/bin/make
+elif [ -x /usr/bin/make.exe ]; then
+  make_cmd=/usr/bin/make.exe
+else
+  echo "MSYS2 make was not found under /usr/bin" >&2
+  exit 1
+fi
 ls -l $(Quote-Bash "$ffmpegSourceMsys/Makefile")
 "`$PKG_CONFIG" --version
 "`$PKG_CONFIG" --cflags --libs dav1d
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
-/usr/bin/make -j`$(nproc)
-/usr/bin/make install
+"`$make_cmd" -j`$(nproc)
+"`$make_cmd" install
 "@
 
 New-Item -ItemType Directory -Force -Path $FFmpegBuild | Out-Null

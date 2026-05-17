@@ -50,6 +50,10 @@ jobs:
             diffutils
             make
 
+      - name: Install MSYS2 make
+        shell: pwsh
+        run: C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed make
+
       - name: Install NASM
         shell: pwsh
         run: |
