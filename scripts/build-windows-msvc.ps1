@@ -48,6 +48,22 @@ function Invoke-Step {
     }
 }
 
+function Invoke-VcpkgBootstrap {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VcpkgRoot
+    )
+
+    $bootstrap = Join-Path $VcpkgRoot "bootstrap-vcpkg.bat"
+    $previousVcpkgRoot = $env:VCPKG_ROOT
+    try {
+        $env:VCPKG_ROOT = $VcpkgRoot
+        Invoke-Step cmd.exe /D /C call $bootstrap -disableMetrics
+    } finally {
+        $env:VCPKG_ROOT = $previousVcpkgRoot
+    }
+}
+
 function Find-Bash {
     $candidates = @(
         "C:\msys64\usr\bin\bash.exe",
@@ -124,8 +140,7 @@ function Resolve-VcpkgRoot {
         }
         New-Item -ItemType Directory -Force -Path $cloneParent | Out-Null
         Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $cloneRoot
-        $bootstrap = Join-Path $cloneRoot "bootstrap-vcpkg.bat"
-        Invoke-Step $bootstrap -disableMetrics
+        Invoke-VcpkgBootstrap $cloneRoot
         return (Resolve-Path $cloneRoot).Path
     }
 
@@ -159,8 +174,7 @@ function Resolve-VcpkgRoot {
     }
     New-Item -ItemType Directory -Force -Path $cloneParent | Out-Null
     Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $cloneRoot
-    $bootstrap = Join-Path $cloneRoot "bootstrap-vcpkg.bat"
-    Invoke-Step $bootstrap -disableMetrics
+    Invoke-VcpkgBootstrap $cloneRoot
     return (Resolve-Path $cloneRoot).Path
 }
 
