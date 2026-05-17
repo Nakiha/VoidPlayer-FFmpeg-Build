@@ -53,8 +53,10 @@ python -m pip install meson ninja
 powershell -ExecutionPolicy Bypass -File scripts/build-windows-msvc.ps1
 ```
 
-MSYS2 must be installed and provide `bash`, `make`, `pkg-config`, and `nasm`.
-The GitHub Actions workflow installs those automatically.
+MSYS2 must be installed and provide `bash`, `make`, and `pkg-config`. NASM
+should be installed as a normal Windows executable, for example under
+`C:\Program Files\NASM`. The GitHub Actions workflow installs those tools
+automatically.
 
 MSYS2 is only used as a build shell. The produced DLLs must be MSVC-linked and
 must not depend on MSYS2 or MinGW runtime DLLs such as `msys-2.0.dll`,

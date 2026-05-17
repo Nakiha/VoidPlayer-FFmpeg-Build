@@ -49,8 +49,15 @@ jobs:
             make
             diffutils
             pkgconf
-            mingw-w64-x86_64-nasm
-            yasm
+
+      - name: Install NASM
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          $nasmDir = "C:\Program Files\NASM"
+          if (Test-Path $nasmDir) {
+            Add-Content -Path $env:GITHUB_PATH -Value $nasmDir
+          }
 
       - name: Setup Python
         uses: actions/setup-python@v5
