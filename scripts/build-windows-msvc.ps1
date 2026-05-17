@@ -521,7 +521,7 @@ if [ "`$need_libs" = "1" ]; then
         echo "Package 'libssh' was not found" >&2
         exit 1
       fi
-      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
+      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlibstatic" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
       ;;
   esac
 fi
