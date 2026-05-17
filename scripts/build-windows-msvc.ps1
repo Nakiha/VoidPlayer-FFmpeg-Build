@@ -447,6 +447,7 @@ $msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Sourc
 $dav1dIncludeMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "include")
 $dav1dLibDirMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib")
 $dav1dPkgConfigMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
+$ffmpegArgs.Add("--extra-cflags=-I$ffmpegSourceMsys/compat/stdbit")
 $libsshIncludeMsys = ""
 $libsshLibDirMsys = ""
 if ($EnableSftp) {
