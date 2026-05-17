@@ -399,6 +399,30 @@ if (-not (Test-Path $expectedBin)) {
         Move-Item -LiteralPath $msysRelativePackageRoot -Destination $PackageRoot
     }
 }
+if (-not (Test-Path $expectedBin)) {
+    Write-Host "==> expected package bin was missing; searching for FFmpeg DLL install root"
+    $candidateBins = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter "avcodec-*.dll" -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Directory } |
+        Sort-Object -Property FullName -Unique |
+        Where-Object {
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avformat-*.dll" -ErrorAction SilentlyContinue) -and
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avutil-*.dll" -ErrorAction SilentlyContinue) -and
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "swresample-*.dll" -ErrorAction SilentlyContinue)
+        }
+    foreach ($candidateBin in $candidateBins) {
+        Write-Host "==> candidate bin: $($candidateBin.FullName)"
+    }
+    $actualBin = $candidateBins | Select-Object -First 1
+    if ($actualBin) {
+        $actualPackageRoot = Split-Path -Parent $actualBin.FullName
+        Write-Host "==> moving discovered install root $actualPackageRoot back to $PackageRoot"
+        if (Test-Path $PackageRoot) {
+            Remove-Item -LiteralPath $PackageRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $PackageRoot) | Out-Null
+        Move-Item -LiteralPath $actualPackageRoot -Destination $PackageRoot
+    }
+}
 
 Assert-NoForbiddenRuntimeDependency -BinDir (Join-Path $PackageRoot "bin")
 
