@@ -229,6 +229,7 @@ Invoke-Step meson setup $Dav1dBuild $Dav1dSource `
     --libdir lib `
     --buildtype release `
     --default-library static `
+    -Db_vscrt=mt `
     -Denable_tools=false `
     -Denable_tests=false
 Invoke-Step meson compile -C $Dav1dBuild
