@@ -78,8 +78,8 @@ add_enable_list() {
 
 require_config_component() {
     local symbol="$1"
-    local config="$FFMPEG_BUILD/ffbuild/config_components.h"
-    grep -q "#define ${symbol} 1" "$config" ||
+    local config="$FFMPEG_BUILD/ffbuild/config.mak"
+    grep -q "^${symbol}=yes" "$config" ||
         die "Required FFmpeg component was not enabled: $symbol"
 }
 

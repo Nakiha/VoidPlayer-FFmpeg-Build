@@ -113,10 +113,22 @@ function Resolve-VcpkgRoot {
         [string]$FallbackRoot
     )
 
-    $candidates = @()
     if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
-        $candidates += $RequestedRoot
+        if (Test-Path (Join-Path $RequestedRoot "vcpkg.exe")) {
+            return (Resolve-Path $RequestedRoot).Path
+        }
+        $cloneParent = Split-Path -Parent $RequestedRoot
+        if ([string]::IsNullOrWhiteSpace($cloneParent)) {
+            $cloneParent = "."
+        }
+        New-Item -ItemType Directory -Force -Path $cloneParent | Out-Null
+        Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $RequestedRoot
+        $bootstrap = Join-Path $RequestedRoot "bootstrap-vcpkg.bat"
+        Invoke-Step $bootstrap -disableMetrics
+        return (Resolve-Path $RequestedRoot).Path
     }
+
+    $candidates = @()
     if ($env:VCPKG_ROOT) {
         $candidates += $env:VCPKG_ROOT
     }
@@ -513,6 +525,14 @@ ls -l $(Quote-Bash "$ffmpegSourceMsys/Makefile")
 $pkgConfigProbe
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
+require_config_component() {
+  local symbol="`$1"
+  local config_mak="ffbuild/config.mak"
+  grep -q "^`$symbol=yes" "`$config_mak" || {
+    echo "Required FFmpeg component was not enabled: `$symbol" >&2
+    exit 1
+  }
+}
 for symbol in \
   CONFIG_HTTP_PROTOCOL \
   CONFIG_HTTPS_PROTOCOL \
@@ -524,16 +544,10 @@ for symbol in \
   CONFIG_AV1_D3D11VA2_HWACCEL \
   CONFIG_VP9_D3D11VA_HWACCEL \
   CONFIG_VP9_D3D11VA2_HWACCEL; do
-  grep -q "#define `$symbol 1" ffbuild/config_components.h || {
-    echo "Required FFmpeg component was not enabled: `$symbol" >&2
-    exit 1
-  }
+  require_config_component "`$symbol"
 done
 if [ "$(if ($EnableSftp) { "1" } else { "0" })" = "1" ]; then
-  grep -q "#define CONFIG_LIBSSH_PROTOCOL 1" ffbuild/config_components.h || {
-    echo "Required FFmpeg component was not enabled: CONFIG_LIBSSH_PROTOCOL" >&2
-    exit 1
-  }
+  require_config_component CONFIG_LIBSSH_PROTOCOL
 fi
 "`$make_cmd" -j`$(nproc)
 "`$make_cmd" install
