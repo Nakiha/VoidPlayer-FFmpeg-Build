@@ -423,6 +423,27 @@ if (-not (Test-Path $expectedBin)) {
         Move-Item -LiteralPath $actualPackageRoot -Destination $PackageRoot
     }
 }
+if (-not (Test-Path $expectedBin)) {
+    Write-Host "==> assembling package directly from FFmpeg build outputs"
+    $packageBin = Join-Path $PackageRoot "bin"
+    $packageLib = Join-Path $PackageRoot "lib"
+    $packageInclude = Join-Path $PackageRoot "include"
+    New-Item -ItemType Directory -Force -Path $packageBin, $packageLib, $packageInclude | Out-Null
+
+    foreach ($libraryName in @("libavcodec", "libavformat", "libavutil", "libswresample")) {
+        $buildLibraryDir = Join-Path $FFmpegBuild $libraryName
+        if (-not (Test-Path $buildLibraryDir)) {
+            throw "Expected FFmpeg build library directory was not produced: $buildLibraryDir"
+        }
+        Get-ChildItem -LiteralPath $buildLibraryDir -File -Filter "*.dll" | Copy-Item -Destination $packageBin -Force
+        Get-ChildItem -LiteralPath $buildLibraryDir -File -Filter "*.lib" | Copy-Item -Destination $packageLib -Force
+        $sourceIncludeDir = Join-Path $FFmpegSource $libraryName
+        $packageLibraryInclude = Join-Path $packageInclude $libraryName
+        New-Item -ItemType Directory -Force -Path $packageLibraryInclude | Out-Null
+        Get-ChildItem -LiteralPath $sourceIncludeDir -File -Filter "*.h" | Copy-Item -Destination $packageLibraryInclude -Force
+        Get-ChildItem -LiteralPath $buildLibraryDir -File -Filter "*.h" | Copy-Item -Destination $packageLibraryInclude -Force
+    }
+}
 
 Assert-NoForbiddenRuntimeDependency -BinDir (Join-Path $PackageRoot "bin")
 
