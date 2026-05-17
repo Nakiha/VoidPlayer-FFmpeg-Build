@@ -303,6 +303,7 @@ $pkgConfigShim = Join-Path $FFmpegBuild "pkg-config"
 $pkgConfigShimMsys = Convert-ToMsysPath $pkgConfigShim
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
 $bashFileMsys = Convert-ToMsysPath $bashFile
+$ffmpegArgs.Add("--pkg-config=$pkgConfigShimMsys")
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
 $bashScript = @"
 set -euo pipefail
