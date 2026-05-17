@@ -382,6 +382,7 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--enable-shared",
     "--disable-static",
     "--disable-autodetect",
+    "--disable-everything",
     "--disable-programs",
     "--disable-doc",
     "--disable-debug",
@@ -438,9 +439,6 @@ Add-EnableList $ffmpegArgs "hwaccel" @(
     "hevc_d3d11va", "hevc_d3d11va2",
     "vp9_d3d11va", "vp9_d3d11va2"
 )
-# FFmpeg n8.1 parses --disable-everything by clearing component lists, so
-# explicit component enables must be registered first.
-$ffmpegArgs.Add("--disable-everything")
 
 $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
 $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
