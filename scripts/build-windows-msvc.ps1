@@ -401,13 +401,13 @@ if (-not (Test-Path $expectedBin)) {
 }
 if (-not (Test-Path $expectedBin)) {
     Write-Host "==> expected package bin was missing; searching for FFmpeg DLL install root"
-    $candidateBins = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter "avcodec-*.dll" -ErrorAction SilentlyContinue |
+    $candidateBins = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter "avcodec*.dll" -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Directory } |
         Sort-Object -Property FullName -Unique |
         Where-Object {
-            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avformat-*.dll" -ErrorAction SilentlyContinue) -and
-            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avutil-*.dll" -ErrorAction SilentlyContinue) -and
-            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "swresample-*.dll" -ErrorAction SilentlyContinue)
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avformat*.dll" -ErrorAction SilentlyContinue) -and
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "avutil*.dll" -ErrorAction SilentlyContinue) -and
+            (Get-ChildItem -LiteralPath $_.FullName -File -Filter "swresample*.dll" -ErrorAction SilentlyContinue)
         }
     foreach ($candidateBin in $candidateBins) {
         Write-Host "==> candidate bin: $($candidateBin.FullName)"
