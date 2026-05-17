@@ -298,7 +298,7 @@ $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
 $nasmDirMsys = Convert-ToMsysPath $NasmDir
 $msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Source)
 $dav1dIncludeMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "include")
-$dav1dMsvcLibMsys = Convert-ToMsysPath $dav1dMsvcLib
+$dav1dLibDirMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib")
 $pkgConfigShim = Join-Path $FFmpegBuild "pkg-config"
 $pkgConfigShimMsys = Convert-ToMsysPath $pkgConfigShim
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
@@ -338,7 +338,7 @@ if [ "`$need_cflags" = "1" ]; then
   out+=("-I$dav1dIncludeMsys")
 fi
 if [ "`$need_libs" = "1" ]; then
-  out+=("$dav1dMsvcLibMsys")
+  out+=("-L$dav1dLibDirMsys" "-ldav1d")
 fi
 printf '%s\n' "`${out[*]}"
 PKGEOF
@@ -363,7 +363,7 @@ Set-Content -LiteralPath $bashFile -Value $bashScript -Encoding ASCII
 Write-Host "==> configuring and building FFmpeg $FFmpegRef"
 & $script:BashPath $bashFileMsys
 if ($LASTEXITCODE -ne 0) {
-    $configLog = Join-Path $FFmpegBuild "config.log"
+    $configLog = Join-Path $FFmpegBuild "ffbuild\config.log"
     if (Test-Path $configLog) {
         Write-Host "==> FFmpeg config.log tail"
         Get-Content -LiteralPath $configLog -Tail 200
