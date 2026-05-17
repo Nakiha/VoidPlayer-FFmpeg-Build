@@ -46,7 +46,7 @@ jobs:
           update: true
           install: >-
             git
-            make
+            base-devel
             diffutils
             pkgconf
 

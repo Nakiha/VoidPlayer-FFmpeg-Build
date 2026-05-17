@@ -290,6 +290,7 @@ $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
 $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
 $dav1dPcMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
 $nasmDirMsys = Convert-ToMsysPath $NasmDir
+$msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Source)
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
 $bashFileMsys = Convert-ToMsysPath $bashFile
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
@@ -300,11 +301,13 @@ export CHERE_INVOKING=1
 mkdir -p $(Quote-Bash $ffmpegBuildMsys)
 cd $(Quote-Bash $ffmpegBuildMsys)
 export PKG_CONFIG_PATH=$(Quote-Bash $dav1dPcMsys)
-export PATH="/usr/bin:${nasmDirMsys}:`$PATH"
+export PKG_CONFIG=/usr/bin/pkgconf
+export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
 command -v make
+command -v pkgconf
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
 make -j`$(nproc)
