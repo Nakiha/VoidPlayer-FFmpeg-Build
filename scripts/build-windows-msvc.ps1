@@ -528,11 +528,11 @@ if [ "`$need_libs" = "1" ]; then
           break
         fi
       done
-      if [ -z "`$zlib_lib" ]; then
-        echo "zlib library not found in $libsshLibDirMsys" >&2
-        exit 1
+      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto")
+      if [ -n "`$zlib_lib" ]; then
+        out+=("`$zlib_lib")
       fi
-      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "`$zlib_lib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
+      out+=("-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
       ;;
   esac
 fi
