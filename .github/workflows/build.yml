@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install nasm pkg-config
-          python3 -m pip install meson ninja
+          python3 -m pip install --break-system-packages meson ninja
 
       - name: Build package
         run: |
