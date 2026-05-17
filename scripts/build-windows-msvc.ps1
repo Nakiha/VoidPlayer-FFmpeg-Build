@@ -255,6 +255,9 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--disable-programs",
     "--disable-doc",
     "--disable-debug",
+    "--disable-avdevice",
+    "--disable-avfilter",
+    "--disable-swscale",
     "--enable-runtime-cpudetect",
     "--enable-avcodec",
     "--enable-avformat",
@@ -381,6 +384,20 @@ if ($LASTEXITCODE -ne 0) {
         Get-Content -LiteralPath $configLog -Tail 200
     }
     throw "FFmpeg build failed with exit code $LASTEXITCODE"
+}
+
+$expectedBin = Join-Path $PackageRoot "bin"
+if (-not (Test-Path $expectedBin)) {
+    $msysRelativePackageRoot = Join-Path $FFmpegBuild ((Convert-ToMsysPath $PackageRoot).TrimStart("/") -replace "/", "\")
+    $msysRelativeBin = Join-Path $msysRelativePackageRoot "bin"
+    if (Test-Path $msysRelativeBin) {
+        Write-Host "==> moving MSYS-relative install root back to $PackageRoot"
+        if (Test-Path $PackageRoot) {
+            Remove-Item -LiteralPath $PackageRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $PackageRoot) | Out-Null
+        Move-Item -LiteralPath $msysRelativePackageRoot -Destination $PackageRoot
+    }
 }
 
 Assert-NoForbiddenRuntimeDependency -BinDir (Join-Path $PackageRoot "bin")
