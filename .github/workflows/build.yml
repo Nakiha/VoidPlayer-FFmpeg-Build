@@ -24,6 +24,48 @@ permissions:
   contents: write
 
 jobs:
+  macos-arm64:
+    name: macOS arm64
+    runs-on: macos-14
+    env:
+      FFMPEG_REF: ${{ github.event.inputs.ffmpeg_ref || 'n8.1' }}
+      DAV1D_REF: ${{ github.event.inputs.dav1d_ref || '1.5.3' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install nasm pkg-config
+          python3 -m pip install meson ninja
+
+      - name: Build package
+        run: |
+          chmod +x scripts/build-macos.sh
+          bash scripts/build-macos.sh \
+            --ffmpeg-ref "$FFMPEG_REF" \
+            --dav1d-ref "$DAV1D_REF" \
+            --clean
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}
+          path: |
+            dist/voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}.zip
+            dist/voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}/voidplayer-ffmpeg-manifest.json
+          if-no-files-found: error
+
+      - name: Publish release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}
+          name: VoidPlayer FFmpeg macOS arm64 ${{ env.FFMPEG_REF }}
+          files: dist/voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}.zip
+          fail_on_unmatched_files: true
+
   windows-x64-msvc:
     name: Windows x64 MSVC
     runs-on: windows-2022
