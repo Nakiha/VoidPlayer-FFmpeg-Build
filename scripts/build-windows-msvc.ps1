@@ -145,15 +145,13 @@ function Resolve-VcpkgRoot {
     }
 
     $candidates = @()
-    if ($env:VCPKG_ROOT) {
-        $candidates += $env:VCPKG_ROOT
-    }
     $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
     if ($vcpkgCommand) {
         $candidates += (Split-Path -Parent $vcpkgCommand.Source)
     }
     $candidates += @(
         "C:\vcpkg",
+        $env:VCPKG_ROOT,
         $FallbackRoot
     )
 
