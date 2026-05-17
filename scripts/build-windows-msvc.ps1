@@ -217,13 +217,12 @@ function Quote-Bash {
 
 function Add-EnableList {
     param(
-        [System.Collections.Generic.List[string]]$Args,
         [string]$Kind,
         [string[]]$Names
     )
 
     foreach ($name in $Names) {
-        $Args.Add("--enable-$Kind=$name")
+        $script:ffmpegArgs.Add("--enable-$Kind=$name")
     }
 }
 
@@ -406,34 +405,34 @@ if ($EnableSftp) {
     $ffmpegArgs.Add("--enable-libssh")
 }
 
-Add-EnableList $ffmpegArgs "protocol" @(
+Add-EnableList "protocol" @(
     "cache", "concat", "file", "http", "https", "pipe", "tcp", "tls"
 )
 if ($EnableSftp) {
     # The configure component is named libssh; the runtime protocol is sftp://.
-    Add-EnableList $ffmpegArgs "protocol" @("libssh")
+    Add-EnableList "protocol" @("libssh")
 }
-Add-EnableList $ffmpegArgs "demuxer" @(
+Add-EnableList "demuxer" @(
     "aac", "asf", "avi", "concat", "flac", "flv", "h264", "hevc", "ivf",
     "live_flv", "m4v", "matroska", "mov", "mp3", "mpegps", "mpegts",
     "mpegvideo", "ogg", "wav"
 )
-Add-EnableList $ffmpegArgs "decoder" @(
+Add-EnableList "decoder" @(
     "aac", "av1", "ffv1", "flac", "h264", "hevc", "libdav1d", "mjpeg",
     "mp3", "mpeg1video", "mpeg2video", "mpeg4", "opus", "pcm_alaw",
     "pcm_f32be", "pcm_f32le", "pcm_mulaw", "pcm_s16be", "pcm_s16le",
     "pcm_s24be", "pcm_s24le", "pcm_s32be", "pcm_s32le", "prores",
     "vorbis", "vp8", "vp9", "wmav1", "wmav2", "wmapro"
 )
-Add-EnableList $ffmpegArgs "parser" @(
+Add-EnableList "parser" @(
     "aac", "aac_latm", "av1", "flac", "h264", "hevc", "mjpeg",
     "mpegaudio", "mpeg4video", "mpegvideo", "opus", "vorbis", "vp8", "vp9"
 )
-Add-EnableList $ffmpegArgs "bsf" @(
+Add-EnableList "bsf" @(
     "av1_frame_merge", "av1_frame_split", "extract_extradata",
     "h264_mp4toannexb", "hevc_mp4toannexb", "null"
 )
-Add-EnableList $ffmpegArgs "hwaccel" @(
+Add-EnableList "hwaccel" @(
     "av1_d3d11va", "av1_d3d11va2",
     "h264_d3d11va", "h264_d3d11va2",
     "hevc_d3d11va", "hevc_d3d11va2",
