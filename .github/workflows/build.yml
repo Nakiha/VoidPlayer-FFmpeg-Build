@@ -1,0 +1,89 @@
+name: Build FFmpeg
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ffmpeg_ref:
+        description: "FFmpeg tag or branch"
+        required: true
+        default: "n8.1"
+      dav1d_ref:
+        description: "dav1d tag or branch"
+        required: true
+        default: "1.5.3"
+      publish_release:
+        description: "Publish a GitHub release for this build"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64-msvc:
+    name: Windows x64 MSVC
+    runs-on: windows-2022
+    env:
+      FFMPEG_REF: ${{ github.event.inputs.ffmpeg_ref || 'n8.1' }}
+      DAV1D_REF: ${{ github.event.inputs.dav1d_ref || '1.5.3' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            git
+            make
+            diffutils
+            pkgconf
+            nasm
+            yasm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Meson and Ninja
+        shell: pwsh
+        run: python -m pip install meson ninja
+
+      - name: Build package
+        shell: pwsh
+        run: >
+          ./scripts/build-windows-msvc.ps1
+          -FFmpegRef $env:FFMPEG_REF
+          -Dav1dRef $env:DAV1D_REF
+          -Clean
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}
+          path: |
+            dist/voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}.zip
+            dist/voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}/voidplayer-ffmpeg-manifest.json
+          if-no-files-found: error
+
+      - name: Publish release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}
+          name: VoidPlayer FFmpeg Windows x64 ${{ env.FFMPEG_REF }}
+          files: dist/voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}.zip
+          fail_on_unmatched_files: true
+
