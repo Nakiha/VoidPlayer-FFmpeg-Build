@@ -319,7 +319,6 @@ if (-not (Get-Command dumpbin.exe -ErrorAction SilentlyContinue)) {
 }
 
 $LibsshInstall = ""
-$PkgconfExe = ""
 $ResolvedVcpkgRoot = ""
 $VcpkgCommit = ""
 if ($EnableSftp) {
@@ -327,7 +326,13 @@ if ($EnableSftp) {
         -RequestedRoot $VcpkgRoot `
         -FallbackRoot (Join-Path $BuildRoot "vcpkg")
     $VcpkgExe = Join-Path $ResolvedVcpkgRoot "vcpkg.exe"
-    Invoke-Step $VcpkgExe install "libssh:$LibsshTriplet" "pkgconf:$LibsshTriplet"
+    $previousVcpkgRoot = $env:VCPKG_ROOT
+    try {
+        $env:VCPKG_ROOT = $ResolvedVcpkgRoot
+        Invoke-Step $VcpkgExe install "libssh:$LibsshTriplet"
+    } finally {
+        $env:VCPKG_ROOT = $previousVcpkgRoot
+    }
     $LibsshInstall = Join-Path $ResolvedVcpkgRoot "installed\$LibsshTriplet"
     $libsshHeader = Join-Path $LibsshInstall "include\libssh\sftp.h"
     $libsshPc = Join-Path $LibsshInstall "lib\pkgconfig\libssh.pc"
@@ -337,7 +342,6 @@ if ($EnableSftp) {
     if (-not (Test-Path $libsshPc)) {
         throw "libssh pkg-config file was not found after vcpkg install: $libsshPc"
     }
-    $PkgconfExe = Resolve-PkgconfExe -VcpkgRoot $ResolvedVcpkgRoot -Triplet $LibsshTriplet
     $VcpkgCommit = (& git -C $ResolvedVcpkgRoot rev-parse HEAD 2>$null)
     if ($LASTEXITCODE -ne 0) {
         $VcpkgCommit = ""
@@ -443,42 +447,30 @@ $msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Sourc
 $dav1dIncludeMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "include")
 $dav1dLibDirMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib")
 $dav1dPkgConfigMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
+$libsshIncludeMsys = ""
+$libsshLibDirMsys = ""
+if ($EnableSftp) {
+    $libsshIncludeMsys = Convert-ToMsysPath (Join-Path $LibsshInstall "include")
+    $libsshLibDirMsys = Convert-ToMsysPath (Join-Path $LibsshInstall "lib")
+}
 $pkgConfigShim = Join-Path $FFmpegBuild "pkg-config"
 $pkgConfigShimMsys = Convert-ToMsysPath $pkgConfigShim
-$pkgConfigSetup = ""
 $pkgConfigProbe = @"
 "`$PKG_CONFIG" --version
 "`$PKG_CONFIG" --cflags --libs dav1d
 "@
 if ($EnableSftp) {
-    $pkgconfMsys = Convert-ToMsysPath $PkgconfExe
-    $libsshPkgConfigMsys = Convert-ToMsysPath (Join-Path $LibsshInstall "lib\pkgconfig")
-    $libsshSharePkgConfig = Join-Path $LibsshInstall "share\pkgconfig"
-    $pkgConfigPathParts = @($dav1dPkgConfigMsys, $libsshPkgConfigMsys)
-    if (Test-Path $libsshSharePkgConfig) {
-        $pkgConfigPathParts += (Convert-ToMsysPath $libsshSharePkgConfig)
-    }
-    $pkgConfigPath = $pkgConfigPathParts -join ":"
-    $pkgConfigSetup = @"
-export PKG_CONFIG=$(Quote-Bash $pkgconfMsys)
-export PKG_CONFIG_PATH=$(Quote-Bash $pkgConfigPath)
-"@
     $pkgConfigProbe += @"
 "`$PKG_CONFIG" --exists libssh
 "`$PKG_CONFIG" --cflags --libs --static libssh
 "@
-} else {
-    $pkgConfigSetup = @"
+}
+$pkgConfigSetup = @"
 export PKG_CONFIG=$(Quote-Bash $pkgConfigShimMsys)
 "@
-}
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
 $bashFileMsys = Convert-ToMsysPath $bashFile
-if ($EnableSftp) {
-    $ffmpegArgs.Add("--pkg-config=$pkgconfMsys")
-} else {
-    $ffmpegArgs.Add("--pkg-config=$pkgConfigShimMsys")
-}
+$ffmpegArgs.Add("--pkg-config=$pkgConfigShimMsys")
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
 $bashScript = @"
 set -euo pipefail
@@ -491,6 +483,9 @@ cat > $(Quote-Bash $pkgConfigShimMsys) <<'PKGEOF'
 set -euo pipefail
 need_cflags=0
 need_libs=0
+exists_only=0
+modversion=0
+packages=()
 for arg in "`$@"; do
   case "`$arg" in
     --version)
@@ -498,8 +493,10 @@ for arg in "`$@"; do
       exit 0
       ;;
     --modversion)
-      echo "$Dav1dRef"
-      exit 0
+      modversion=1
+      ;;
+    --exists|--print-errors|--static)
+      exists_only=1
       ;;
     --cflags)
       need_cflags=1
@@ -507,15 +504,60 @@ for arg in "`$@"; do
     --libs*)
       need_libs=1
       ;;
+    -*)
+      ;;
+    *)
+      packages+=("`$arg")
+      ;;
   esac
 done
+if [ "`$`{#packages[@]`}" = "0" ]; then
+  packages=("dav1d")
+fi
+for package in "`$`{packages[@]`}"; do
+  case "`$package" in
+    dav1d|libssh) ;;
+    *)
+      echo "Package '`$package' was not found" >&2
+      exit 1
+      ;;
+  esac
+done
+if [ "`$modversion" = "1" ]; then
+  case "`$`{packages[0]`}" in
+    dav1d) echo "$Dav1dRef" ;;
+    libssh) echo "0.12.0" ;;
+  esac
+  exit 0
+fi
+if [ "`$exists_only" = "1" ] && [ "`$need_cflags" = "0" ] && [ "`$need_libs" = "0" ]; then
+  exit 0
+fi
 out=()
-if [ "`$need_cflags" = "1" ]; then
-  out+=("-I$dav1dIncludeMsys")
-fi
-if [ "`$need_libs" = "1" ]; then
-  out+=("-L$dav1dLibDirMsys" "-ldav1d")
-fi
+for package in "`$`{packages[@]`}"; do
+  case "`$package" in
+    dav1d)
+      if [ "`$need_cflags" = "1" ]; then
+        out+=("-I$dav1dIncludeMsys")
+      fi
+      if [ "`$need_libs" = "1" ]; then
+        out+=("-L$dav1dLibDirMsys" "-ldav1d")
+      fi
+      ;;
+    libssh)
+      if [ "$(if ($EnableSftp) { "1" } else { "0" })" != "1" ]; then
+        echo "Package 'libssh' was not found" >&2
+        exit 1
+      fi
+      if [ "`$need_cflags" = "1" ]; then
+        out+=("-I$libsshIncludeMsys")
+      fi
+      if [ "`$need_libs" = "1" ]; then
+        out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
+      fi
+      ;;
+  esac
+done
 printf '%s\n' "`${out[*]}"
 PKGEOF
 chmod +x $(Quote-Bash $pkgConfigShimMsys)
