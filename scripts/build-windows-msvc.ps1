@@ -152,6 +152,10 @@ if ($Clean -and (Test-Path $BuildRoot)) {
 
 New-Item -ItemType Directory -Force -Path $SourceRoot, $WorkRoot, $DistRoot | Out-Null
 $script:BashPath = Find-Bash
+$MsysUsrBin = Split-Path -Parent $script:BashPath
+if ($env:Path -notlike "*$MsysUsrBin*") {
+    $env:Path = "$env:Path;$MsysUsrBin"
+}
 
 if (-not (Get-Command meson -ErrorAction SilentlyContinue)) {
     throw "meson was not found. Run: python -m pip install meson ninja"
@@ -167,6 +171,9 @@ if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
 }
 if (-not (Get-Command dumpbin.exe -ErrorAction SilentlyContinue)) {
     throw "dumpbin.exe was not found. Run from a Visual Studio Developer PowerShell."
+}
+if (-not (Get-Command nasm.exe -ErrorAction SilentlyContinue) -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+    throw "nasm was not found. Install NASM or install the MSYS2 nasm package."
 }
 
 if (-not (Test-Path $Dav1dSource)) {
