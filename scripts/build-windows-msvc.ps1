@@ -557,7 +557,15 @@ fi
 ls -l $(Quote-Bash "$ffmpegSourceMsys/Makefile")
 $pkgConfigProbe
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
+set +e
+set +o pipefail
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
+configure_status=`$?
+set -e
+set -o pipefail
+if [ "`$configure_status" -ne 0 ]; then
+  exit "`$configure_status"
+fi
 require_config_component() {
   local symbol="`$1"
   local config_mak="ffbuild/config.mak"
