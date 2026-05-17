@@ -234,6 +234,13 @@ Invoke-Step meson setup $Dav1dBuild $Dav1dSource `
 Invoke-Step meson compile -C $Dav1dBuild
 Invoke-Step meson install -C $Dav1dBuild
 
+$dav1dStaticLib = Join-Path $Dav1dInstall "lib\libdav1d.a"
+$dav1dMsvcLib = Join-Path $Dav1dInstall "lib\dav1d.lib"
+if (-not (Test-Path $dav1dStaticLib)) {
+    throw "Expected dav1d static library was not produced: $dav1dStaticLib"
+}
+Copy-Item -LiteralPath $dav1dStaticLib -Destination $dav1dMsvcLib -Force
+
 $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
 @(
     "--prefix=$(Convert-ToMsysPath $PackageRoot)",
@@ -288,9 +295,12 @@ Add-EnableList $ffmpegArgs "hwaccel" @(
 
 $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
 $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
-$dav1dPcMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
 $nasmDirMsys = Convert-ToMsysPath $NasmDir
 $msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Source)
+$dav1dIncludeMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "include")
+$dav1dMsvcLibMsys = Convert-ToMsysPath $dav1dMsvcLib
+$pkgConfigShim = Join-Path $FFmpegBuild "pkg-config"
+$pkgConfigShimMsys = Convert-ToMsysPath $pkgConfigShim
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
 $bashFileMsys = Convert-ToMsysPath $bashFile
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
@@ -300,25 +310,47 @@ export MSYSTEM=UCRT64
 export CHERE_INVOKING=1
 mkdir -p $(Quote-Bash $ffmpegBuildMsys)
 cd $(Quote-Bash $ffmpegBuildMsys)
-export PKG_CONFIG_PATH=$(Quote-Bash $dav1dPcMsys)
-if [ -x /usr/bin/pkgconf ]; then
-  export PKG_CONFIG=/usr/bin/pkgconf
-elif [ -x /usr/bin/pkg-config ]; then
-  export PKG_CONFIG=/usr/bin/pkg-config
-elif [ -x /mingw64/bin/pkgconf ]; then
-  export PKG_CONFIG=/mingw64/bin/pkgconf
-elif [ -x /mingw64/bin/pkg-config ]; then
-  export PKG_CONFIG=/mingw64/bin/pkg-config
-else
-  echo "pkg-config/pkgconf not found" >&2
-  exit 1
+cat > $(Quote-Bash $pkgConfigShimMsys) <<'PKGEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+need_cflags=0
+need_libs=0
+for arg in "`$@"; do
+  case "`$arg" in
+    --version)
+      echo "0.29.2"
+      exit 0
+      ;;
+    --modversion)
+      echo "$Dav1dRef"
+      exit 0
+      ;;
+    --cflags)
+      need_cflags=1
+      ;;
+    --libs*)
+      need_libs=1
+      ;;
+  esac
+done
+out=()
+if [ "`$need_cflags" = "1" ]; then
+  out+=("-I$dav1dIncludeMsys")
 fi
+if [ "`$need_libs" = "1" ]; then
+  out+=("$dav1dMsvcLibMsys")
+fi
+printf '%s\n' "`${out[*]}"
+PKGEOF
+chmod +x $(Quote-Bash $pkgConfigShimMsys)
+export PKG_CONFIG=$(Quote-Bash $pkgConfigShimMsys)
 export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
 command -v make
 "`$PKG_CONFIG" --version
+"`$PKG_CONFIG" --cflags --libs dav1d
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
 make -j`$(nproc)
