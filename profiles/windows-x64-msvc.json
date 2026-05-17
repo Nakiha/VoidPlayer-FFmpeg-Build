@@ -87,6 +87,16 @@
     "hevc_mp4toannexb",
     "null"
   ],
+  "hwAccelerators": [
+    "av1_d3d11va",
+    "av1_d3d11va2",
+    "h264_d3d11va",
+    "h264_d3d11va2",
+    "hevc_d3d11va",
+    "hevc_d3d11va2",
+    "vp9_d3d11va",
+    "vp9_d3d11va2"
+  ],
   "protocols": [
     "cache",
     "concat",
@@ -94,4 +104,3 @@
     "pipe"
   ]
 }
-

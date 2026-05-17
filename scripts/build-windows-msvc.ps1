@@ -255,7 +255,6 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--enable-libdav1d",
     "--enable-d3d11va",
     "--enable-dxva2",
-    "--enable-hwaccels",
     "--pkg-config-flags=--static"
 ) | ForEach-Object { $ffmpegArgs.Add($_) }
 
@@ -279,6 +278,12 @@ Add-EnableList $ffmpegArgs "parser" @(
 Add-EnableList $ffmpegArgs "bsf" @(
     "av1_frame_merge", "av1_frame_split", "extract_extradata",
     "h264_mp4toannexb", "hevc_mp4toannexb", "null"
+)
+Add-EnableList $ffmpegArgs "hwaccel" @(
+    "av1_d3d11va", "av1_d3d11va2",
+    "h264_d3d11va", "h264_d3d11va2",
+    "hevc_d3d11va", "hevc_d3d11va2",
+    "vp9_d3d11va", "vp9_d3d11va2"
 )
 
 $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
@@ -307,6 +312,11 @@ make install
 Write-Host "==> configuring and building FFmpeg $FFmpegRef"
 & $script:BashPath -lc $bashScript
 if ($LASTEXITCODE -ne 0) {
+    $configLog = Join-Path $FFmpegBuild "config.log"
+    if (Test-Path $configLog) {
+        Write-Host "==> FFmpeg config.log tail"
+        Get-Content -LiteralPath $configLog -Tail 200
+    }
     throw "FFmpeg build failed with exit code $LASTEXITCODE"
 }
 
