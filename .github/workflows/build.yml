@@ -48,6 +48,7 @@ jobs:
             git
             base-devel
             diffutils
+            make
 
       - name: Install NASM
         shell: pwsh

@@ -350,13 +350,14 @@ export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
-command -v make
+test -x /usr/bin/make
+ls -l $(Quote-Bash "$ffmpegSourceMsys/Makefile")
 "`$PKG_CONFIG" --version
 "`$PKG_CONFIG" --cflags --libs dav1d
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
-make -j`$(nproc)
-make install
+/usr/bin/make -j`$(nproc)
+/usr/bin/make install
 "@
 
 New-Item -ItemType Directory -Force -Path $FFmpegBuild | Out-Null
