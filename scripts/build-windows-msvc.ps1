@@ -481,83 +481,50 @@ cd $(Quote-Bash $ffmpegBuildMsys)
 cat > $(Quote-Bash $pkgConfigShimMsys) <<'PKGEOF'
 #!/usr/bin/env bash
 set -euo pipefail
+args=" `$* "
+case "`$args" in
+  *" --version "*)
+    echo "0.29.2"
+    exit 0
+    ;;
+esac
+case "`$args" in
+  *" --modversion "*)
+    case "`$args" in
+      *libssh*) echo "0.12.0" ;;
+      *) echo "$Dav1dRef" ;;
+    esac
+    exit 0
+    ;;
+esac
+case "`$args" in
+  *" --exists "*)
+  exit 0
+    ;;
+esac
 need_cflags=0
 need_libs=0
-exists_only=0
-modversion=0
-packages=()
-for arg in "`$@"; do
-  case "`$arg" in
-    --version)
-      echo "0.29.2"
-      exit 0
-      ;;
-    --modversion)
-      modversion=1
-      ;;
-    --exists|--print-errors|--static)
-      exists_only=1
-      ;;
-    --cflags)
-      need_cflags=1
-      ;;
-    --libs*)
-      need_libs=1
-      ;;
-    -*)
-      ;;
-    *)
-      packages+=("`$arg")
-      ;;
-  esac
-done
-if [ "`$`{#packages[@]`}" = "0" ]; then
-  packages=("dav1d")
-fi
-for package in "`$`{packages[@]`}"; do
-  case "`$package" in
-    dav1d|libssh) ;;
-    *)
-      echo "Package '`$package' was not found" >&2
-      exit 1
-      ;;
-  esac
-done
-if [ "`$modversion" = "1" ]; then
-  case "`$`{packages[0]`}" in
-    dav1d) echo "$Dav1dRef" ;;
-    libssh) echo "0.12.0" ;;
-  esac
-  exit 0
-fi
-if [ "`$exists_only" = "1" ] && [ "`$need_cflags" = "0" ] && [ "`$need_libs" = "0" ]; then
-  exit 0
-fi
+case "`$args" in *" --cflags "*) need_cflags=1 ;; esac
+case "`$args" in *" --libs"*) need_libs=1 ;; esac
 out=()
-for package in "`$`{packages[@]`}"; do
-  case "`$package" in
-    dav1d)
-      if [ "`$need_cflags" = "1" ]; then
-        out+=("-I$dav1dIncludeMsys")
-      fi
-      if [ "`$need_libs" = "1" ]; then
-        out+=("-L$dav1dLibDirMsys" "-ldav1d")
-      fi
-      ;;
-    libssh)
+if [ "`$need_cflags" = "1" ]; then
+  out+=("-I$dav1dIncludeMsys")
+  case "`$args" in
+    *libssh*) out+=("-I$libsshIncludeMsys") ;;
+  esac
+fi
+if [ "`$need_libs" = "1" ]; then
+  out+=("-L$dav1dLibDirMsys" "-ldav1d")
+  case "`$args" in
+    *libssh*)
       if [ "$(if ($EnableSftp) { "1" } else { "0" })" != "1" ]; then
         echo "Package 'libssh' was not found" >&2
         exit 1
       fi
-      if [ "`$need_cflags" = "1" ]; then
-        out+=("-I$libsshIncludeMsys")
-      fi
-      if [ "`$need_libs" = "1" ]; then
-        out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
-      fi
+      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
       ;;
   esac
-done
+fi
 printf '%s\n' "`${out[*]}"
 PKGEOF
 chmod +x $(Quote-Bash $pkgConfigShimMsys)
