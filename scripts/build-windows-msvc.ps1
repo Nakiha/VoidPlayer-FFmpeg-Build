@@ -521,7 +521,18 @@ if [ "`$need_libs" = "1" ]; then
         echo "Package 'libssh' was not found" >&2
         exit 1
       fi
-      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "-lzlibstatic" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
+      zlib_lib=""
+      for candidate in z zlib zlibstatic; do
+        if [ -f "$libsshLibDirMsys/`${candidate}.lib" ]; then
+          zlib_lib="-l`${candidate}"
+          break
+        fi
+      done
+      if [ -z "`$zlib_lib" ]; then
+        echo "zlib library not found in $libsshLibDirMsys" >&2
+        exit 1
+      fi
+      out+=("-L$libsshLibDirMsys" "-lssh" "-llibssl" "-llibcrypto" "`$zlib_lib" "-lws2_32" "-lcrypt32" "-lbcrypt" "-ladvapi32" "-luser32")
       ;;
   esac
 fi
