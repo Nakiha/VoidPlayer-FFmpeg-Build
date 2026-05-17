@@ -49,6 +49,7 @@ jobs:
             base-devel
             diffutils
             pkgconf
+            mingw-w64-x86_64-pkgconf
 
       - name: Install NASM
         shell: pwsh

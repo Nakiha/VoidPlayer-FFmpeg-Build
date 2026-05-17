@@ -301,13 +301,24 @@ export CHERE_INVOKING=1
 mkdir -p $(Quote-Bash $ffmpegBuildMsys)
 cd $(Quote-Bash $ffmpegBuildMsys)
 export PKG_CONFIG_PATH=$(Quote-Bash $dav1dPcMsys)
-export PKG_CONFIG=/usr/bin/pkgconf
+if [ -x /usr/bin/pkgconf ]; then
+  export PKG_CONFIG=/usr/bin/pkgconf
+elif [ -x /usr/bin/pkg-config ]; then
+  export PKG_CONFIG=/usr/bin/pkg-config
+elif [ -x /mingw64/bin/pkgconf ]; then
+  export PKG_CONFIG=/mingw64/bin/pkgconf
+elif [ -x /mingw64/bin/pkg-config ]; then
+  export PKG_CONFIG=/mingw64/bin/pkg-config
+else
+  echo "pkg-config/pkgconf not found" >&2
+  exit 1
+fi
 export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
 command -v make
-command -v pkgconf
+"`$PKG_CONFIG" --version
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
 make -j`$(nproc)
