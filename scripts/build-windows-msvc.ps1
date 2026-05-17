@@ -63,6 +63,46 @@ function Find-Bash {
     throw "MSYS2 bash.exe was not found. Install MSYS2 or add bash.exe to PATH."
 }
 
+function Resolve-FirstExistingPath {
+    param([string[]]$Candidates)
+
+    foreach ($candidate in $Candidates) {
+        if ($candidate -and (Test-Path $candidate)) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+    return ""
+}
+
+function Resolve-CommandPath {
+    param([string]$Name)
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+    return ""
+}
+
+function Resolve-NasmExe {
+    $nasmExe = Resolve-FirstExistingPath @(
+        (Resolve-CommandPath "nasm.exe"),
+        (Resolve-CommandPath "nasm"),
+        "C:\Program Files\NASM\nasm.exe",
+        "C:\Program Files (x86)\NASM\nasm.exe",
+        "C:\msys64\usr\bin\nasm.exe",
+        "C:\msys64\mingw64\bin\nasm.exe",
+        "C:\msys64\ucrt64\bin\nasm.exe",
+        "$env:LOCALAPPDATA\bin\NASM\nasm.exe"
+    )
+
+    if ($nasmExe) {
+        return $nasmExe
+    }
+
+    throw "nasm was not found. Install NASM or install the MSYS2 mingw-w64-x86_64-nasm package."
+}
+
 function Convert-ToMsysPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -156,6 +196,11 @@ $MsysUsrBin = Split-Path -Parent $script:BashPath
 if ($env:Path -notlike "*$MsysUsrBin*") {
     $env:Path = "$env:Path;$MsysUsrBin"
 }
+$NasmExe = Resolve-NasmExe
+$NasmDir = Split-Path -Parent $NasmExe
+if ($env:Path -notlike "*$NasmDir*") {
+    $env:Path = "$env:Path;$NasmDir"
+}
 
 if (-not (Get-Command meson -ErrorAction SilentlyContinue)) {
     throw "meson was not found. Run: python -m pip install meson ninja"
@@ -172,10 +217,6 @@ if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command dumpbin.exe -ErrorAction SilentlyContinue)) {
     throw "dumpbin.exe was not found. Run from a Visual Studio Developer PowerShell."
 }
-if (-not (Get-Command nasm.exe -ErrorAction SilentlyContinue) -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
-    throw "nasm was not found. Install NASM or install the MSYS2 nasm package."
-}
-
 if (-not (Test-Path $Dav1dSource)) {
     Invoke-Step git clone --depth 1 --branch $Dav1dRef https://code.videolan.org/videolan/dav1d.git $Dav1dSource
 }
@@ -243,6 +284,7 @@ Add-EnableList $ffmpegArgs "bsf" @(
 $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
 $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
 $dav1dPcMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
+$nasmDirMsys = Convert-ToMsysPath $NasmDir
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
 $bashScript = @"
 set -euo pipefail
@@ -251,12 +293,12 @@ export CHERE_INVOKING=1
 mkdir -p $(Quote-Bash $ffmpegBuildMsys)
 cd $(Quote-Bash $ffmpegBuildMsys)
 export PKG_CONFIG_PATH=$(Quote-Bash $dav1dPcMsys)
-export PATH="/usr/bin:`$PATH"
+export PATH="/usr/bin:${nasmDirMsys}:`$PATH"
 command -v cl.exe
 command -v link.exe
 command -v dumpbin.exe
 command -v make
-command -v nasm.exe || command -v nasm
+$(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
 make -j`$(nproc)
 make install

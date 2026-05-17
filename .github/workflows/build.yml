@@ -49,7 +49,7 @@ jobs:
             make
             diffutils
             pkgconf
-            nasm
+            mingw-w64-x86_64-nasm
             yasm
 
       - name: Setup Python
@@ -86,4 +86,3 @@ jobs:
           name: VoidPlayer FFmpeg Windows x64 ${{ env.FFMPEG_REF }}
           files: dist/voidplayer-ffmpeg-windows-x64-${{ env.FFMPEG_REF }}.zip
           fail_on_unmatched_files: true
-
