@@ -4,7 +4,10 @@ param(
     [string]$Dav1dRef = "1.5.3",
     [string]$BuildRoot = "",
     [string]$DistRoot = "",
+    [string]$VcpkgRoot = "",
+    [string]$LibsshTriplet = "x64-windows-static-md",
     [switch]$Clean,
+    [switch]$DisableSftp,
     [switch]$SkipPackage
 )
 
@@ -20,6 +23,7 @@ if ([string]::IsNullOrWhiteSpace($DistRoot)) {
 }
 
 $PackageName = "voidplayer-ffmpeg-windows-x64-$FFmpegRef"
+$EnableSftp = -not $DisableSftp
 $SourceRoot = Join-Path $BuildRoot "sources"
 $WorkRoot = Join-Path $BuildRoot "work"
 $Dav1dSource = Join-Path $SourceRoot "dav1d"
@@ -103,6 +107,73 @@ function Resolve-NasmExe {
     throw "nasm was not found. Install NASM or install the MSYS2 mingw-w64-x86_64-nasm package."
 }
 
+function Resolve-VcpkgRoot {
+    param(
+        [string]$RequestedRoot,
+        [string]$FallbackRoot
+    )
+
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $candidates += $RequestedRoot
+    }
+    if ($env:VCPKG_ROOT) {
+        $candidates += $env:VCPKG_ROOT
+    }
+    $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+    if ($vcpkgCommand) {
+        $candidates += (Split-Path -Parent $vcpkgCommand.Source)
+    }
+    $candidates += @(
+        "C:\vcpkg",
+        $FallbackRoot
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path (Join-Path $candidate "vcpkg.exe"))) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    $cloneRoot = if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        $RequestedRoot
+    } else {
+        $FallbackRoot
+    }
+    $cloneParent = Split-Path -Parent $cloneRoot
+    if ([string]::IsNullOrWhiteSpace($cloneParent)) {
+        $cloneParent = "."
+    }
+    New-Item -ItemType Directory -Force -Path $cloneParent | Out-Null
+    Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $cloneRoot
+    $bootstrap = Join-Path $cloneRoot "bootstrap-vcpkg.bat"
+    Invoke-Step $bootstrap -disableMetrics
+    return (Resolve-Path $cloneRoot).Path
+}
+
+function Resolve-PkgconfExe {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VcpkgRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$Triplet
+    )
+
+    $candidates = @(
+        (Join-Path $VcpkgRoot "installed\$Triplet\tools\pkgconf\pkgconf.exe"),
+        (Join-Path $VcpkgRoot "installed\$Triplet\tools\pkgconf\pkg-config.exe"),
+        (Resolve-CommandPath "pkgconf.exe"),
+        (Resolve-CommandPath "pkg-config.exe"),
+        (Resolve-CommandPath "pkgconf"),
+        (Resolve-CommandPath "pkg-config")
+    )
+    $resolved = Resolve-FirstExistingPath $candidates
+    if ($resolved) {
+        return $resolved
+    }
+    throw "pkgconf/pkg-config was not found after vcpkg install."
+}
+
 function Convert-ToMsysPath {
     param(
         [Parameter(Mandatory = $true)]
@@ -143,7 +214,11 @@ function Assert-NoForbiddenRuntimeDependency {
         "^libgcc_s.*\.dll$",
         "^libstdc\+\+-6\.dll$",
         "^libiconv-2\.dll$",
-        "^libintl-8\.dll$"
+        "^libintl-8\.dll$",
+        "^libssh.*\.dll$",
+        "^libcrypto.*\.dll$",
+        "^libssl.*\.dll$",
+        "^zlib.*\.dll$"
     )
 
     if (-not (Test-Path $BinDir)) {
@@ -217,6 +292,33 @@ if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command dumpbin.exe -ErrorAction SilentlyContinue)) {
     throw "dumpbin.exe was not found. Run from a Visual Studio Developer PowerShell."
 }
+
+$LibsshInstall = ""
+$PkgconfExe = ""
+$ResolvedVcpkgRoot = ""
+$VcpkgCommit = ""
+if ($EnableSftp) {
+    $ResolvedVcpkgRoot = Resolve-VcpkgRoot `
+        -RequestedRoot $VcpkgRoot `
+        -FallbackRoot (Join-Path $BuildRoot "vcpkg")
+    $VcpkgExe = Join-Path $ResolvedVcpkgRoot "vcpkg.exe"
+    Invoke-Step $VcpkgExe install "libssh:$LibsshTriplet" "pkgconf:$LibsshTriplet"
+    $LibsshInstall = Join-Path $ResolvedVcpkgRoot "installed\$LibsshTriplet"
+    $libsshHeader = Join-Path $LibsshInstall "include\libssh\sftp.h"
+    $libsshPc = Join-Path $LibsshInstall "lib\pkgconfig\libssh.pc"
+    if (-not (Test-Path $libsshHeader)) {
+        throw "libssh headers were not found after vcpkg install: $libsshHeader"
+    }
+    if (-not (Test-Path $libsshPc)) {
+        throw "libssh pkg-config file was not found after vcpkg install: $libsshPc"
+    }
+    $PkgconfExe = Resolve-PkgconfExe -VcpkgRoot $ResolvedVcpkgRoot -Triplet $LibsshTriplet
+    $VcpkgCommit = (& git -C $ResolvedVcpkgRoot rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        $VcpkgCommit = ""
+    }
+}
+
 if (-not (Test-Path $Dav1dSource)) {
     Invoke-Step git clone --depth 1 --branch $Dav1dRef https://code.videolan.org/videolan/dav1d.git $Dav1dSource
 }
@@ -266,10 +368,22 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--enable-libdav1d",
     "--enable-d3d11va",
     "--enable-dxva2",
+    "--enable-schannel",
+    "--enable-network",
     "--pkg-config-flags=--static"
 ) | ForEach-Object { $ffmpegArgs.Add($_) }
 
-Add-EnableList $ffmpegArgs "protocol" @("cache", "concat", "file", "pipe")
+if ($EnableSftp) {
+    $ffmpegArgs.Add("--enable-libssh")
+}
+
+Add-EnableList $ffmpegArgs "protocol" @(
+    "cache", "concat", "file", "http", "https", "pipe", "tcp", "tls"
+)
+if ($EnableSftp) {
+    # The configure component is named libssh; the runtime protocol is sftp://.
+    Add-EnableList $ffmpegArgs "protocol" @("libssh")
+}
 Add-EnableList $ffmpegArgs "demuxer" @(
     "aac", "asf", "avi", "concat", "flac", "flv", "h264", "hevc", "ivf",
     "live_flv", "m4v", "matroska", "mov", "mp3", "mpegps", "mpegts",
@@ -303,11 +417,43 @@ $nasmDirMsys = Convert-ToMsysPath $NasmDir
 $msvcBinMsys = Convert-ToMsysPath (Split-Path -Parent (Get-Command cl.exe).Source)
 $dav1dIncludeMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "include")
 $dav1dLibDirMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib")
+$dav1dPkgConfigMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
 $pkgConfigShim = Join-Path $FFmpegBuild "pkg-config"
 $pkgConfigShimMsys = Convert-ToMsysPath $pkgConfigShim
+$pkgConfigSetup = ""
+$pkgConfigProbe = @"
+"`$PKG_CONFIG" --version
+"`$PKG_CONFIG" --cflags --libs dav1d
+"@
+if ($EnableSftp) {
+    $pkgconfMsys = Convert-ToMsysPath $PkgconfExe
+    $libsshPkgConfigMsys = Convert-ToMsysPath (Join-Path $LibsshInstall "lib\pkgconfig")
+    $libsshSharePkgConfig = Join-Path $LibsshInstall "share\pkgconfig"
+    $pkgConfigPathParts = @($dav1dPkgConfigMsys, $libsshPkgConfigMsys)
+    if (Test-Path $libsshSharePkgConfig) {
+        $pkgConfigPathParts += (Convert-ToMsysPath $libsshSharePkgConfig)
+    }
+    $pkgConfigPath = $pkgConfigPathParts -join ":"
+    $pkgConfigSetup = @"
+export PKG_CONFIG=$(Quote-Bash $pkgconfMsys)
+export PKG_CONFIG_PATH=$(Quote-Bash $pkgConfigPath)
+"@
+    $pkgConfigProbe += @"
+"`$PKG_CONFIG" --exists libssh
+"`$PKG_CONFIG" --cflags --libs --static libssh
+"@
+} else {
+    $pkgConfigSetup = @"
+export PKG_CONFIG=$(Quote-Bash $pkgConfigShimMsys)
+"@
+}
 $bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
 $bashFileMsys = Convert-ToMsysPath $bashFile
-$ffmpegArgs.Add("--pkg-config=$pkgConfigShimMsys")
+if ($EnableSftp) {
+    $ffmpegArgs.Add("--pkg-config=$pkgconfMsys")
+} else {
+    $ffmpegArgs.Add("--pkg-config=$pkgConfigShimMsys")
+}
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
 $bashScript = @"
 set -euo pipefail
@@ -348,7 +494,7 @@ fi
 printf '%s\n' "`${out[*]}"
 PKGEOF
 chmod +x $(Quote-Bash $pkgConfigShimMsys)
-export PKG_CONFIG=$(Quote-Bash $pkgConfigShimMsys)
+$pkgConfigSetup
 export PATH="${msvcBinMsys}:${nasmDirMsys}:/usr/bin:`$PATH"
 command -v cl.exe
 command -v link.exe
@@ -364,10 +510,31 @@ else
   exit 1
 fi
 ls -l $(Quote-Bash "$ffmpegSourceMsys/Makefile")
-"`$PKG_CONFIG" --version
-"`$PKG_CONFIG" --cflags --libs dav1d
+$pkgConfigProbe
 $(Quote-Bash (Convert-ToMsysPath $NasmExe)) --version
 $(Quote-Bash "$ffmpegSourceMsys/configure") $configureLine
+for symbol in \
+  CONFIG_HTTP_PROTOCOL \
+  CONFIG_HTTPS_PROTOCOL \
+  CONFIG_H264_D3D11VA_HWACCEL \
+  CONFIG_H264_D3D11VA2_HWACCEL \
+  CONFIG_HEVC_D3D11VA_HWACCEL \
+  CONFIG_HEVC_D3D11VA2_HWACCEL \
+  CONFIG_AV1_D3D11VA_HWACCEL \
+  CONFIG_AV1_D3D11VA2_HWACCEL \
+  CONFIG_VP9_D3D11VA_HWACCEL \
+  CONFIG_VP9_D3D11VA2_HWACCEL; do
+  grep -q "#define `$symbol 1" ffbuild/config_components.h || {
+    echo "Required FFmpeg component was not enabled: `$symbol" >&2
+    exit 1
+  }
+done
+if [ "$(if ($EnableSftp) { "1" } else { "0" })" = "1" ]; then
+  grep -q "#define CONFIG_LIBSSH_PROTOCOL 1" ffbuild/config_components.h || {
+    echo "Required FFmpeg component was not enabled: CONFIG_LIBSSH_PROTOCOL" >&2
+    exit 1
+  }
+fi
 "`$make_cmd" -j`$(nproc)
 "`$make_cmd" install
 "@
@@ -462,6 +629,24 @@ $dav1dLicense = Join-Path $Dav1dSource "COPYING"
 if (Test-Path $dav1dLicense) {
     Copy-Item $dav1dLicense -Destination (Join-Path $licenseRoot "dav1d-COPYING") -Force
 }
+if ($EnableSftp -and $LibsshInstall) {
+    foreach ($packageName in @("libssh", "openssl", "zlib")) {
+        $copyright = Join-Path $LibsshInstall "share\$packageName\copyright"
+        if (Test-Path $copyright) {
+            Copy-Item $copyright -Destination (Join-Path $licenseRoot "$packageName-copyright.txt") -Force
+        }
+    }
+}
+
+$packageProtocols = @("cache", "concat", "file", "http", "https", "pipe")
+if ($EnableSftp) {
+    $packageProtocols += "sftp"
+}
+$sftpSupportDescription = if ($EnableSftp) {
+    "libssh via vcpkg $LibsshTriplet, statically linked"
+} else {
+    "disabled"
+}
 
 $manifest = [ordered]@{
     package = $PackageName
@@ -470,9 +655,19 @@ $manifest = [ordered]@{
     dav1dRef = $Dav1dRef
     builtAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     libraries = @("avcodec", "avformat", "avutil", "swresample")
+    protocols = $packageProtocols
+    hwAccelerators = @(
+        "av1_d3d11va", "av1_d3d11va2",
+        "h264_d3d11va", "h264_d3d11va2",
+        "hevc_d3d11va", "hevc_d3d11va2",
+        "vp9_d3d11va", "vp9_d3d11va2"
+    )
     av1SoftwareDecoder = "libdav1d"
+    sftpSupport = $sftpSupportDescription
+    vcpkgRoot = $ResolvedVcpkgRoot
+    vcpkgCommit = $VcpkgCommit
     analysisFfmpegSubmodule = "not included"
-    forbiddenRuntimeDependencyCheck = "dumpbin /dependents"
+    forbiddenRuntimeDependencyCheck = "dumpbin /dependents; rejects MSYS/MinGW runtime DLLs and dynamic libssh/OpenSSL/zlib"
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $PackageRoot "voidplayer-ffmpeg-manifest.json") -Encoding UTF8
 
@@ -486,6 +681,9 @@ Target: windows-x64-msvc
 This package is intended for VoidPlayer/windows/libs/ffmpeg.
 It contains avcodec, avformat, avutil, swresample, headers, MSVC import
 libraries, runtime DLLs, and license material.
+
+D3D11VA/DXVA2 hardware acceleration and HTTP/HTTPS playback are enabled.
+SFTP playback is $sftpSupportDescription.
 
 The instrumented analysis FFmpeg submodule is not included.
 "@ | Set-Content -Path (Join-Path $PackageRoot "README.txt") -Encoding UTF8

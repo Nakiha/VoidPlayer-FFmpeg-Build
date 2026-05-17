@@ -1,7 +1,7 @@
 {
-  "name": "voidplayer-windows-x64-msvc",
-  "target": "windows-x64",
-  "toolchain": "msvc",
+  "name": "voidplayer-macos-arm64",
+  "target": "macos-arm64",
+  "toolchain": "apple-clang",
   "ffmpegRef": "n8.1",
   "dav1dRef": "1.5.3",
   "externalDependencies": [
@@ -10,13 +10,6 @@
       "version": "1.5.3",
       "linkage": "static",
       "usedFor": "AV1 software decoding"
-    },
-    {
-      "name": "libssh",
-      "source": "vcpkg",
-      "triplet": "x64-windows-static-md",
-      "linkage": "static",
-      "usedFor": "FFmpeg sftp:// protocol"
     }
   ],
   "libraries": [
@@ -103,14 +96,10 @@
     "null"
   ],
   "hwAccelerators": [
-    "av1_d3d11va",
-    "av1_d3d11va2",
-    "h264_d3d11va",
-    "h264_d3d11va2",
-    "hevc_d3d11va",
-    "hevc_d3d11va2",
-    "vp9_d3d11va",
-    "vp9_d3d11va2"
+    "h264_videotoolbox",
+    "hevc_videotoolbox",
+    "vp9_videotoolbox",
+    "av1_videotoolbox"
   ],
   "protocols": [
     "cache",
@@ -118,7 +107,6 @@
     "file",
     "http",
     "https",
-    "pipe",
-    "sftp"
+    "pipe"
   ]
 }

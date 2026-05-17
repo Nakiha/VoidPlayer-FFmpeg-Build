@@ -1,7 +1,8 @@
 .build/
+.vcpkg/
+.venv/
 dist/
 *.zip
 *.7z
 *.tar.gz
 *.log
-
