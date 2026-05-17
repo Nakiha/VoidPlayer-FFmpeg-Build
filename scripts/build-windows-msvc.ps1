@@ -117,15 +117,16 @@ function Resolve-VcpkgRoot {
         if (Test-Path (Join-Path $RequestedRoot "vcpkg.exe")) {
             return (Resolve-Path $RequestedRoot).Path
         }
-        $cloneParent = Split-Path -Parent $RequestedRoot
+        $cloneRoot = [System.IO.Path]::GetFullPath($RequestedRoot)
+        $cloneParent = Split-Path -Parent $cloneRoot
         if ([string]::IsNullOrWhiteSpace($cloneParent)) {
             $cloneParent = "."
         }
         New-Item -ItemType Directory -Force -Path $cloneParent | Out-Null
-        Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $RequestedRoot
-        $bootstrap = Join-Path $RequestedRoot "bootstrap-vcpkg.bat"
+        Invoke-Step git clone --depth 1 https://github.com/microsoft/vcpkg.git $cloneRoot
+        $bootstrap = Join-Path $cloneRoot "bootstrap-vcpkg.bat"
         Invoke-Step $bootstrap -disableMetrics
-        return (Resolve-Path $RequestedRoot).Path
+        return (Resolve-Path $cloneRoot).Path
     }
 
     $candidates = @()
