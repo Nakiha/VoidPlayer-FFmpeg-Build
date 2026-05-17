@@ -290,6 +290,8 @@ $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
 $ffmpegSourceMsys = Convert-ToMsysPath $FFmpegSource
 $dav1dPcMsys = Convert-ToMsysPath (Join-Path $Dav1dInstall "lib\pkgconfig")
 $nasmDirMsys = Convert-ToMsysPath $NasmDir
+$bashFile = Join-Path $FFmpegBuild "build_ffmpeg.sh"
+$bashFileMsys = Convert-ToMsysPath $bashFile
 $configureLine = ($ffmpegArgs | ForEach-Object { Quote-Bash $_ }) -join " "
 $bashScript = @"
 set -euo pipefail
@@ -309,8 +311,11 @@ make -j`$(nproc)
 make install
 "@
 
+New-Item -ItemType Directory -Force -Path $FFmpegBuild | Out-Null
+Set-Content -LiteralPath $bashFile -Value $bashScript -Encoding ASCII
+
 Write-Host "==> configuring and building FFmpeg $FFmpegRef"
-& $script:BashPath -lc $bashScript
+& $script:BashPath $bashFileMsys
 if ($LASTEXITCODE -ne 0) {
     $configLog = Join-Path $FFmpegBuild "config.log"
     if (Test-Path $configLog) {
