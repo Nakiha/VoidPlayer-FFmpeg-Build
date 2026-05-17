@@ -430,7 +430,7 @@ Add-EnableList "parser" @(
 )
 Add-EnableList "bsf" @(
     "av1_frame_merge", "av1_frame_split", "extract_extradata",
-    "h264_mp4toannexb", "hevc_mp4toannexb", "null"
+    "h264_mp4toannexb", "hevc_mp4toannexb", "null", "vvc_mp4toannexb"
 )
 Add-EnableList "hwaccel" @(
     "av1_d3d11va", "av1_d3d11va2",
