@@ -685,10 +685,10 @@ if (Test-Path $dav1dLicense) {
     Copy-Item $dav1dLicense -Destination (Join-Path $licenseRoot "dav1d-COPYING") -Force
 }
 if ($EnableSftp -and $LibsshInstall) {
-    foreach ($packageName in @("libssh", "openssl", "zlib")) {
-        $copyright = Join-Path $LibsshInstall "share\$packageName\copyright"
+    foreach ($dependencyPackageName in @("libssh", "openssl", "zlib")) {
+        $copyright = Join-Path $LibsshInstall "share\$dependencyPackageName\copyright"
         if (Test-Path $copyright) {
-            Copy-Item $copyright -Destination (Join-Path $licenseRoot "$packageName-copyright.txt") -Force
+            Copy-Item $copyright -Destination (Join-Path $licenseRoot "$dependencyPackageName-copyright.txt") -Force
         }
     }
 }
