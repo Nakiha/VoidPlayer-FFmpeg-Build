@@ -197,7 +197,8 @@ FFMPEG_ARGS+=(
     "--enable-shared"
     "--disable-static"
     "--disable-autodetect"
-    "--disable-everything"
+    "--disable-encoders"
+    "--disable-muxers"
     "--disable-programs"
     "--disable-doc"
     "--disable-debug"
@@ -218,25 +219,7 @@ FFMPEG_ARGS+=(
 
 add_enable_list protocol cache concat file http https pipe tcp tls
 
-add_enable_list demuxer \
-    aac asf avi concat flac flv h264 hevc ivf \
-    live_flv m4v matroska mov mp3 mpegps mpegts \
-    mpegvideo ogg wav
-
-add_enable_list decoder \
-    aac av1 ffv1 flac h264 hevc libdav1d mjpeg \
-    mp3 mpeg1video mpeg2video mpeg4 opus pcm_alaw \
-    pcm_f32be pcm_f32le pcm_mulaw pcm_s16be pcm_s16le \
-    pcm_s24be pcm_s24le pcm_s32be pcm_s32le prores \
-    vorbis vp8 vp9 wmav1 wmav2 wmapro
-
-add_enable_list parser \
-    aac aac_latm av1 flac h264 hevc mjpeg \
-    mpegaudio mpeg4video mpegvideo opus vorbis vp8 vp9
-
-add_enable_list bsf \
-    av1_frame_merge av1_frame_split extract_extradata \
-    h264_mp4toannexb hevc_mp4toannexb null
+add_enable_list decoder libdav1d
 
 add_enable_list hwaccel \
     h264_videotoolbox hevc_videotoolbox \
@@ -248,6 +231,28 @@ cd "$FFMPEG_BUILD"
 step "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
 require_config_component CONFIG_HTTP_PROTOCOL
 require_config_component CONFIG_HTTPS_PROTOCOL
+require_config_component CONFIG_MOV_DEMUXER
+require_config_component CONFIG_MATROSKA_DEMUXER
+require_config_component CONFIG_FLV_DEMUXER
+require_config_component CONFIG_AVI_DEMUXER
+require_config_component CONFIG_MPEGTS_DEMUXER
+require_config_component CONFIG_AAC_DECODER
+require_config_component CONFIG_AC3_DECODER
+require_config_component CONFIG_EAC3_DECODER
+require_config_component CONFIG_MP1_DECODER
+require_config_component CONFIG_MP2_DECODER
+require_config_component CONFIG_MP3_DECODER
+require_config_component CONFIG_DCA_DECODER
+require_config_component CONFIG_TRUEHD_DECODER
+require_config_component CONFIG_APE_DECODER
+require_config_component CONFIG_ALAC_DECODER
+require_config_component CONFIG_H264_DECODER
+require_config_component CONFIG_HEVC_DECODER
+require_config_component CONFIG_VVC_DECODER
+require_config_component CONFIG_AV1_DECODER
+require_config_component CONFIG_LIBDAV1D_DECODER
+require_config_component CONFIG_VVC_PARSER
+require_config_component CONFIG_VVC_MP4TOANNEXB_BSF
 require_config_component CONFIG_H264_VIDEOTOOLBOX_HWACCEL
 require_config_component CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
 require_config_component CONFIG_AV1_VIDEOTOOLBOX_HWACCEL
@@ -296,6 +301,9 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
   "builtAtUtc": "$BUILT_AT",
   "libraries": ["avcodec", "avformat", "avutil", "swresample"],
   "protocols": ["cache", "concat", "file", "http", "https", "pipe"],
+  "componentPolicy": "FFmpeg default demuxers, decoders, parsers, bitstream filters, and built-in protocols are enabled; encoders, muxers, devices, filters, programs, swscale, and avdevice are disabled.",
+  "representativeDemuxers": ["mov/mp4", "matroska/webm", "avi", "flv", "mpegts", "mpegps", "ogg", "asf", "wav", "raw h264/hevc/vvc"],
+  "representativeDecoders": ["h264", "hevc", "vvc/h266", "av1", "vp8", "vp9", "mpeg1/2/4", "aac", "ac3", "eac3", "dca/dts", "truehd", "mp1", "mp2", "mp3", "flac", "alac", "ape", "opus", "vorbis", "pcm"],
   "av1SoftwareDecoder": "libdav1d",
   "hardwareAcceleration": "videotoolbox",
   "installNames": "@rpath",
@@ -319,6 +327,11 @@ and AV1 decoding.
 
 Local file and HTTP/HTTPS playback protocols are enabled. Dylib install names
 are rewritten to @rpath for app-bundle redistribution.
+
+FFmpeg's broad default demuxer/decoder/parser/bitstream-filter set is enabled
+for playback compatibility, including H.266/VVC software decode. Encoders,
+muxers, devices, filters, command-line programs, avdevice, and swscale are not
+included.
 
 The instrumented analysis FFmpeg submodule is not included.
 EOF

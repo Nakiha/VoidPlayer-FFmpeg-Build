@@ -1,9 +1,10 @@
 # VoidPlayer FFmpeg Build
 
-Minimal FFmpeg dependency builds for VoidPlayer.
+Playback-focused FFmpeg dependency builds for VoidPlayer.
 
-This repository builds small runtime/dev packages for VoidPlayer without
-carrying full official FFmpeg distributions.
+This repository builds runtime/dev packages for VoidPlayer without carrying
+full official FFmpeg distributions, command-line tools, encoders, muxers,
+filters, or device support.
 
 ## Scope
 
@@ -34,18 +35,19 @@ links `swresample`, so this build keeps that ABI.
 
 ## Default Feature Profile
 
-The profiles disable FFmpeg's broad auto-detection and enable only the pieces
-useful for playback:
+The profiles keep FFmpeg's broad default playback surface and disable the parts
+VoidPlayer does not ship:
 
-- common file demuxers: MP4/MOV, Matroska/WebM, AVI, FLV, MPEG-TS/PS, raw H.264,
-  raw HEVC, IVF, Ogg, MP3, AAC, WAV, FLAC, ASF
-- common video decoders: H.264, HEVC, AV1, VP8, VP9, MPEG-1/2/4, MJPEG, ProRes,
-  FFV1
-- common audio decoders: AAC, MP3, FLAC, Opus, Vorbis, PCM variants
-- local and HTTP/HTTPS input protocols; Windows also enables SFTP
-- platform hardware acceleration entry points
-- selected bitstream filters and parsers
-- `libdav1d` for AV1 software decode
+- default FFmpeg demuxers, decoders, parsers, and bitstream filters are enabled
+- representative coverage includes MP4/MOV, Matroska/WebM, AVI, FLV,
+  MPEG-TS/PS, Ogg, ASF, WAV, raw H.264/HEVC/VVC, H.264, HEVC, H.266/VVC, AV1,
+  VP8/VP9, MPEG-1/2/4, AAC, AC3/EAC3, DTS/DCA, TrueHD, MP1/MP2/MP3, FLAC, ALAC,
+  APE, Opus, Vorbis, and PCM
+- encoders, muxers, command-line programs, avdevice/devices, avfilter/filters,
+  and swscale are disabled
+- local and HTTP/HTTPS input protocols are enabled; Windows also enables SFTP
+- platform hardware acceleration entry points are enabled
+- `libdav1d` is enabled for AV1 software decode
 
 | Platform | Acceleration | Extra Protocols |
 | --- | --- | --- |

@@ -60,7 +60,11 @@ function Invoke-VcpkgBootstrap {
         $env:VCPKG_ROOT = $VcpkgRoot
         Invoke-Step cmd.exe /D /C call $bootstrap -disableMetrics
     } finally {
-        $env:VCPKG_ROOT = $previousVcpkgRoot
+        if ([string]::IsNullOrEmpty($previousVcpkgRoot)) {
+            Remove-Item Env:\VCPKG_ROOT -ErrorAction SilentlyContinue
+        } else {
+            $env:VCPKG_ROOT = $previousVcpkgRoot
+        }
     }
 }
 
@@ -381,7 +385,8 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--enable-shared",
     "--disable-static",
     "--disable-autodetect",
-    "--disable-everything",
+    "--disable-encoders",
+    "--disable-muxers",
     "--disable-programs",
     "--disable-doc",
     "--disable-debug",
@@ -412,26 +417,7 @@ if ($EnableSftp) {
     # The configure component is named libssh; the runtime protocol is sftp://.
     Add-EnableList "protocol" @("libssh")
 }
-Add-EnableList "demuxer" @(
-    "aac", "asf", "avi", "concat", "flac", "flv", "h264", "hevc", "ivf",
-    "live_flv", "m4v", "matroska", "mov", "mp3", "mpegps", "mpegts",
-    "mpegvideo", "ogg", "wav"
-)
-Add-EnableList "decoder" @(
-    "aac", "av1", "ffv1", "flac", "h264", "hevc", "libdav1d", "mjpeg",
-    "mp3", "mpeg1video", "mpeg2video", "mpeg4", "opus", "pcm_alaw",
-    "pcm_f32be", "pcm_f32le", "pcm_mulaw", "pcm_s16be", "pcm_s16le",
-    "pcm_s24be", "pcm_s24le", "pcm_s32be", "pcm_s32le", "prores",
-    "vorbis", "vp8", "vp9", "wmav1", "wmav2", "wmapro"
-)
-Add-EnableList "parser" @(
-    "aac", "aac_latm", "av1", "flac", "h264", "hevc", "mjpeg",
-    "mpegaudio", "mpeg4video", "mpegvideo", "opus", "vorbis", "vp8", "vp9"
-)
-Add-EnableList "bsf" @(
-    "av1_frame_merge", "av1_frame_split", "extract_extradata",
-    "h264_mp4toannexb", "hevc_mp4toannexb", "null", "vvc_mp4toannexb"
-)
+Add-EnableList "decoder" @("libdav1d")
 Add-EnableList "hwaccel" @(
     "av1_d3d11va", "av1_d3d11va2",
     "h264_d3d11va", "h264_d3d11va2",
@@ -577,6 +563,28 @@ require_config_component() {
 for symbol in \
   CONFIG_HTTP_PROTOCOL \
   CONFIG_HTTPS_PROTOCOL \
+  CONFIG_MOV_DEMUXER \
+  CONFIG_MATROSKA_DEMUXER \
+  CONFIG_FLV_DEMUXER \
+  CONFIG_AVI_DEMUXER \
+  CONFIG_MPEGTS_DEMUXER \
+  CONFIG_AAC_DECODER \
+  CONFIG_AC3_DECODER \
+  CONFIG_EAC3_DECODER \
+  CONFIG_MP1_DECODER \
+  CONFIG_MP2_DECODER \
+  CONFIG_MP3_DECODER \
+  CONFIG_DCA_DECODER \
+  CONFIG_TRUEHD_DECODER \
+  CONFIG_APE_DECODER \
+  CONFIG_ALAC_DECODER \
+  CONFIG_H264_DECODER \
+  CONFIG_HEVC_DECODER \
+  CONFIG_VVC_DECODER \
+  CONFIG_AV1_DECODER \
+  CONFIG_LIBDAV1D_DECODER \
+  CONFIG_VVC_PARSER \
+  CONFIG_VVC_MP4TOANNEXB_BSF \
   CONFIG_H264_D3D11VA_HWACCEL \
   CONFIG_H264_D3D11VA2_HWACCEL \
   CONFIG_HEVC_D3D11VA_HWACCEL \
@@ -711,6 +719,9 @@ $manifest = [ordered]@{
     builtAtUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     libraries = @("avcodec", "avformat", "avutil", "swresample")
     protocols = $packageProtocols
+    componentPolicy = "FFmpeg default demuxers, decoders, parsers, bitstream filters, and built-in protocols are enabled; encoders, muxers, devices, filters, programs, swscale, and avdevice are disabled."
+    representativeDemuxers = @("mov/mp4", "matroska/webm", "avi", "flv", "mpegts", "mpegps", "ogg", "asf", "wav", "raw h264/hevc/vvc")
+    representativeDecoders = @("h264", "hevc", "vvc/h266", "av1", "vp8", "vp9", "mpeg1/2/4", "aac", "ac3", "eac3", "dca/dts", "truehd", "mp1", "mp2", "mp3", "flac", "alac", "ape", "opus", "vorbis", "pcm")
     hwAccelerators = @(
         "av1_d3d11va", "av1_d3d11va2",
         "h264_d3d11va", "h264_d3d11va2",
@@ -739,6 +750,11 @@ libraries, runtime DLLs, and license material.
 
 D3D11VA/DXVA2 hardware acceleration and HTTP/HTTPS playback are enabled.
 SFTP playback is $sftpSupportDescription.
+
+FFmpeg's broad default demuxer/decoder/parser/bitstream-filter set is enabled
+for playback compatibility, including H.266/VVC software decode. Encoders,
+muxers, devices, filters, command-line programs, avdevice, and swscale are not
+included.
 
 The instrumented analysis FFmpeg submodule is not included.
 "@ | Set-Content -Path (Join-Path $PackageRoot "README.txt") -Encoding UTF8
