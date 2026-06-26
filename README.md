@@ -14,7 +14,7 @@ filters, or device support.
 - Windows SFTP helper: libssh from vcpkg, statically linked into `avformat`.
 - Target layout: `include/`, `lib/`, plus platform runtime libraries, license,
   and manifest files.
-- Windows x64: MSVC import libraries, DLLs, D3D11VA/DXVA2 hardware accel.
+- Windows x64: MSVC import libraries, DLLs, D3D11VA/D3D12VA/DXVA2 hardware accel.
 - macOS arm64: shared libraries (`.dylib`), VideoToolbox hardware accel.
 
 The FFmpeg analysis tooling under
@@ -51,7 +51,7 @@ VoidPlayer does not ship:
 
 | Platform | Acceleration | Extra Protocols |
 | --- | --- | --- |
-| Windows x64 | D3D11VA / DXVA2 | SFTP via static libssh |
+| Windows x64 | D3D11VA / D3D12VA / DXVA2 | SFTP via static libssh |
 | macOS arm64 | VideoToolbox | none |
 
 ## Build Locally -- Windows
@@ -159,7 +159,7 @@ dumpbin /dependents dist\voidplayer-ffmpeg-windows-x64-n8.1\bin\avformat-*.dll
 ```
 
 The manifest should include `file`, `http`, `https`, and `sftp`; hardware
-acceleration entries should include `d3d11va`; and `dumpbin` should not show
+acceleration entries should include `d3d11va` and `d3d12va`; and `dumpbin` should not show
 MSYS2/MinGW runtime DLLs or dynamic `libssh`/OpenSSL/zlib DLLs.
 
 For macOS packages:

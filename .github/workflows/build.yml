@@ -191,7 +191,15 @@ jobs:
             "CONFIG_AV1_DECODER",
             "CONFIG_LIBDAV1D_DECODER",
             "CONFIG_VVC_PARSER",
-            "CONFIG_VVC_MP4TOANNEXB_BSF"
+            "CONFIG_VVC_MP4TOANNEXB_BSF",
+            "CONFIG_D3D12VA",
+            "CONFIG_AV1_D3D12VA_HWACCEL",
+            "CONFIG_H264_D3D12VA_HWACCEL",
+            "CONFIG_HEVC_D3D12VA_HWACCEL",
+            "CONFIG_MPEG2_D3D12VA_HWACCEL",
+            "CONFIG_VC1_D3D12VA_HWACCEL",
+            "CONFIG_VP9_D3D12VA_HWACCEL",
+            "CONFIG_WMV3_D3D12VA_HWACCEL"
           )
           foreach ($symbol in $required) {
             if (-not (Select-String -Path $config -Pattern "^$symbol=yes$" -Quiet)) {

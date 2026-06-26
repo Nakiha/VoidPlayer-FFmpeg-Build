@@ -400,6 +400,7 @@ $ffmpegArgs = [System.Collections.Generic.List[string]]::new()
     "--enable-swresample",
     "--enable-libdav1d",
     "--enable-d3d11va",
+    "--enable-d3d12va",
     "--enable-dxva2",
     "--enable-schannel",
     "--enable-network",
@@ -419,10 +420,13 @@ if ($EnableSftp) {
 }
 Add-EnableList "decoder" @("libdav1d")
 Add-EnableList "hwaccel" @(
-    "av1_d3d11va", "av1_d3d11va2",
-    "h264_d3d11va", "h264_d3d11va2",
-    "hevc_d3d11va", "hevc_d3d11va2",
-    "vp9_d3d11va", "vp9_d3d11va2"
+    "av1_d3d11va", "av1_d3d11va2", "av1_d3d12va",
+    "h264_d3d11va", "h264_d3d11va2", "h264_d3d12va",
+    "hevc_d3d11va", "hevc_d3d11va2", "hevc_d3d12va",
+    "mpeg2_d3d12va",
+    "vc1_d3d12va",
+    "vp9_d3d11va", "vp9_d3d11va2", "vp9_d3d12va",
+    "wmv3_d3d12va"
 )
 
 $ffmpegBuildMsys = Convert-ToMsysPath $FFmpegBuild
@@ -585,14 +589,22 @@ for symbol in \
   CONFIG_LIBDAV1D_DECODER \
   CONFIG_VVC_PARSER \
   CONFIG_VVC_MP4TOANNEXB_BSF \
+  CONFIG_D3D12VA \
   CONFIG_H264_D3D11VA_HWACCEL \
   CONFIG_H264_D3D11VA2_HWACCEL \
+  CONFIG_H264_D3D12VA_HWACCEL \
   CONFIG_HEVC_D3D11VA_HWACCEL \
   CONFIG_HEVC_D3D11VA2_HWACCEL \
+  CONFIG_HEVC_D3D12VA_HWACCEL \
   CONFIG_AV1_D3D11VA_HWACCEL \
   CONFIG_AV1_D3D11VA2_HWACCEL \
+  CONFIG_AV1_D3D12VA_HWACCEL \
+  CONFIG_MPEG2_D3D12VA_HWACCEL \
+  CONFIG_VC1_D3D12VA_HWACCEL \
   CONFIG_VP9_D3D11VA_HWACCEL \
-  CONFIG_VP9_D3D11VA2_HWACCEL; do
+  CONFIG_VP9_D3D11VA2_HWACCEL \
+  CONFIG_VP9_D3D12VA_HWACCEL \
+  CONFIG_WMV3_D3D12VA_HWACCEL; do
   require_config_component "`$symbol"
 done
 if [ "$(if ($EnableSftp) { "1" } else { "0" })" = "1" ]; then
@@ -723,10 +735,13 @@ $manifest = [ordered]@{
     representativeDemuxers = @("mov/mp4", "matroska/webm", "avi", "flv", "mpegts", "mpegps", "ogg", "asf", "wav", "raw h264/hevc/vvc")
     representativeDecoders = @("h264", "hevc", "vvc/h266", "av1", "vp8", "vp9", "mpeg1/2/4", "aac", "ac3", "eac3", "dca/dts", "truehd", "mp1", "mp2", "mp3", "flac", "alac", "ape", "opus", "vorbis", "pcm")
     hwAccelerators = @(
-        "av1_d3d11va", "av1_d3d11va2",
-        "h264_d3d11va", "h264_d3d11va2",
-        "hevc_d3d11va", "hevc_d3d11va2",
-        "vp9_d3d11va", "vp9_d3d11va2"
+        "av1_d3d11va", "av1_d3d11va2", "av1_d3d12va",
+        "h264_d3d11va", "h264_d3d11va2", "h264_d3d12va",
+        "hevc_d3d11va", "hevc_d3d11va2", "hevc_d3d12va",
+        "mpeg2_d3d12va",
+        "vc1_d3d12va",
+        "vp9_d3d11va", "vp9_d3d11va2", "vp9_d3d12va",
+        "wmv3_d3d12va"
     )
     av1SoftwareDecoder = "libdav1d"
     sftpSupport = $sftpSupportDescription
@@ -748,7 +763,7 @@ This package is intended for VoidPlayer/windows/libs/ffmpeg.
 It contains avcodec, avformat, avutil, swresample, headers, MSVC import
 libraries, runtime DLLs, and license material.
 
-D3D11VA/DXVA2 hardware acceleration and HTTP/HTTPS playback are enabled.
+D3D11VA/D3D12VA/DXVA2 hardware acceleration and HTTP/HTTPS playback are enabled.
 SFTP playback is $sftpSupportDescription.
 
 FFmpeg's broad default demuxer/decoder/parser/bitstream-filter set is enabled

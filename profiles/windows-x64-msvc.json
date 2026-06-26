@@ -33,7 +33,7 @@
       "FFmpeg default bitstream filters",
       "FFmpeg default built-in protocols",
       "libdav1d AV1 software decoder",
-      "D3D11VA/DXVA2 hardware acceleration",
+      "D3D11VA/D3D12VA/DXVA2 hardware acceleration",
       "SFTP via static libssh"
     ],
     "disabled": [
@@ -90,7 +90,15 @@
     "CONFIG_APE_DECODER",
     "CONFIG_MATROSKA_DEMUXER",
     "CONFIG_MOV_DEMUXER",
-    "CONFIG_MPEGTS_DEMUXER"
+    "CONFIG_MPEGTS_DEMUXER",
+    "CONFIG_D3D12VA",
+    "CONFIG_AV1_D3D12VA_HWACCEL",
+    "CONFIG_H264_D3D12VA_HWACCEL",
+    "CONFIG_HEVC_D3D12VA_HWACCEL",
+    "CONFIG_MPEG2_D3D12VA_HWACCEL",
+    "CONFIG_VC1_D3D12VA_HWACCEL",
+    "CONFIG_VP9_D3D12VA_HWACCEL",
+    "CONFIG_WMV3_D3D12VA_HWACCEL"
   ],
   "protocols": [
     "cache",
