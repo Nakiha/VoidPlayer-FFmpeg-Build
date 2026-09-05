@@ -90,6 +90,16 @@ DEMUXERS="mov matroska mpegts mpegps avi"
 DECODERS="ffv1 h264 hevc mpeg1video mpeg2video mpeg4 mjpeg prores vvc vp8 vp9"
 PARSERS="ffv1 h264 hevc mpegvideo mpeg4video mjpeg vvc vp8 vp9"
 
+# wasm SIMD128 (all modern browsers, Safari >= 16.4) measurably speeds up the
+# software decoders; disable with WASM_SIMD=0 for exotic targets.
+WASM_SIMD="${WASM_SIMD:-1}"
+SIMD_ARGS=()
+SIMD_CFLAGS=""
+if [ "$WASM_SIMD" = "1" ]; then
+    SIMD_ARGS=("--extra-cflags=-msimd128" "--extra-ldflags=-msimd128")
+    SIMD_CFLAGS="-msimd128"
+fi
+
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"
     "--cc=emcc"
@@ -118,6 +128,7 @@ FFMPEG_ARGS=(
     "--enable-avutil"
     "--enable-swscale"
     "--enable-protocol=file"
+    "${SIMD_ARGS[@]}"
 )
 for demuxer in $DEMUXERS; do FFMPEG_ARGS+=("--enable-demuxer=$demuxer"); done
 for decoder in $DECODERS; do FFMPEG_ARGS+=("--enable-decoder=$decoder"); done
@@ -137,7 +148,7 @@ cd - > /dev/null
 
 mkdir -p "$PACKAGE_ROOT"
 
-step emcc -O2 "$REPO_ROOT/wasm/vp_decoder.c" \
+step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
     -lavformat -lavcodec -lswscale -lavutil \
