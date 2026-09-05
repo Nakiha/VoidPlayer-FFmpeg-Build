@@ -59,6 +59,26 @@ static void vp_reset_decoder_state(VPContext *ctx) {
 void vp_close_input(VPContext *ctx);
 static int vp_decode_one(VPContext *ctx);
 
+// Binary-search the ascending index; ticks come from packets in decode order
+// and are sorted at build time.
+static size_t vp_index_lower_bound(const VPContext *ctx, int64_t ticks) {
+    size_t lo = 0, hi = ctx->index_count;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (ctx->index_ticks[mid] < ticks) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
+static int g_thread_count = 0;
+
+// Player-assigned decode thread budget for the NEXT vp_open on this context's
+// decoder. av_cpu_count() always reports 1 under Emscripten, so without this
+// every decoder would silently run single-threaded.
+void vp_set_threads(int count) {
+    g_thread_count = count > 0 ? count : 0;
+}
+
 VPContext *vp_create(void) {
     VPContext *ctx = calloc(1, sizeof(VPContext));
     if (!ctx) return NULL;
@@ -110,10 +130,9 @@ int vp_open(VPContext *ctx, const char *path) {
     ctx->dec = avcodec_alloc_context3(codec);
     if (!ctx->dec) return VP_ERR;
 #ifdef VP_MT
-    // av_cpu_count() cannot see the host under Emscripten (always returns 1),
-    // which silently pins VVC's own task executor to one thread. Hand the
-    // decoder the real core count in the pthreads build.
-    ctx->dec->thread_count = emscripten_num_logical_cores();
+    // Player-managed thread budget: fall back to the host's core count when
+    // the player did not assign one.
+    ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : emscripten_num_logical_cores();
 #endif
     AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
     if (avcodec_parameters_to_context(ctx->dec, stream->codecpar) < 0) return VP_ERR;
@@ -300,11 +319,8 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
     int seek = ctx->decode_eof || target_ticks < ctx->last_ticks || !ctx->have_frame;
     if (!seek && ctx->index_count > 0) {
         // Walk forward only for nearby targets; jump via keyframe otherwise.
-        size_t ahead = 0;
-        for (size_t i = 0; i < ctx->index_count && ctx->index_ticks[i] <= target_ticks; i++) {
-            if (ctx->index_ticks[i] > ctx->last_ticks) ahead++;
-        }
-        seek = ahead > VP_MAX_FORWARD_WALK;
+        size_t ahead = vp_index_lower_bound(ctx, ctx->last_ticks + 1);
+        seek = (vp_index_lower_bound(ctx, target_ticks + 1) - ahead) > VP_MAX_FORWARD_WALK;
     }
     int restarted = 0;
     for (;;) {
