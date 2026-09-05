@@ -7,3 +7,4 @@ dist/
 *.tar.gz
 *.log
 .toolchains/
+.DS_Store
