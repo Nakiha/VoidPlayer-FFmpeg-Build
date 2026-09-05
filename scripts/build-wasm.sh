@@ -14,6 +14,7 @@ BUILD_ROOT=""
 DIST_ROOT=""
 CLEAN=false
 SKIP_PACKAGE=false
+MT=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -22,6 +23,7 @@ while [[ $# -gt 0 ]]; do
         --build-root)    BUILD_ROOT="$2"; shift 2 ;;
         --dist-root)     DIST_ROOT="$2";  shift 2 ;;
         --clean)         CLEAN=true;      shift ;;
+        --mt)            MT=true;         shift ;;
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
@@ -30,6 +32,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --build-root PATH    Build directory    (default: .build)"
             echo "  --dist-root PATH     Output directory   (default: dist)"
             echo "  --clean              Wipe build directory before starting"
+            echo "  --mt                 Multi-threaded core (pthreads + SharedArrayBuffer;"
+            echo "                       requires COOP/COEP isolation on the host page)"
             echo "  --skip-package       Skip zip creation"
             exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -41,10 +45,12 @@ BUILD_ROOT="${BUILD_ROOT:-$REPO_ROOT/.build}"
 DIST_ROOT="${DIST_ROOT:-$REPO_ROOT/dist}"
 EMSDK_ROOT="${EMSDK:-$REPO_ROOT/.toolchains/emsdk}"
 
-PACKAGE_NAME="voidplayer-ffmpeg-wasm-${FFMPEG_REF}"
+SUFFIX=""
+if $MT; then SUFFIX="-mt"; fi
+PACKAGE_NAME="voidplayer-ffmpeg-wasm${SUFFIX}-${FFMPEG_REF}"
 FFMPEG_SOURCE="$BUILD_ROOT/sources/ffmpeg-wasm"
-FFMPEG_BUILD="$BUILD_ROOT/work/ffmpeg-wasm"
-FFMPEG_INSTALL="$BUILD_ROOT/work/ffmpeg-wasm-install"
+FFMPEG_BUILD="$BUILD_ROOT/work/ffmpeg-wasm${SUFFIX}"
+FFMPEG_INSTALL="$BUILD_ROOT/work/ffmpeg-wasm${SUFFIX}-install"
 PACKAGE_ROOT="$DIST_ROOT/$PACKAGE_NAME"
 
 die() {
@@ -99,6 +105,10 @@ if [ "$WASM_SIMD" = "1" ]; then
     SIMD_ARGS=("--extra-cflags=-msimd128" "--extra-ldflags=-msimd128")
     SIMD_CFLAGS="-msimd128"
 fi
+if $MT; then
+    SIMD_ARGS=("--extra-cflags=-msimd128 -pthread -DVP_MT" "--extra-ldflags=-msimd128 -pthread")
+    SIMD_CFLAGS="-msimd128 -pthread -DVP_MT"
+fi
 
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"
@@ -130,6 +140,9 @@ FFMPEG_ARGS=(
     "--enable-protocol=file"
     "${SIMD_ARGS[@]}"
 )
+if $MT; then
+    FFMPEG_ARGS+=("--enable-pthreads")
+fi
 for demuxer in $DEMUXERS; do FFMPEG_ARGS+=("--enable-demuxer=$demuxer"); done
 for decoder in $DECODERS; do FFMPEG_ARGS+=("--enable-decoder=$decoder"); done
 for parser in $PARSERS; do FFMPEG_ARGS+=("--enable-parser=$parser"); done
@@ -148,6 +161,12 @@ cd - > /dev/null
 
 mkdir -p "$PACKAGE_ROOT"
 
+MT_LDFLAGS=()
+if $MT; then
+    # Pool sized for decode workers; spawned inside our hosting Web Worker.
+    MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
+fi
+
 step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
@@ -158,9 +177,10 @@ step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -sALLOW_MEMORY_GROWTH=1 \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
+    "${MT_LDFLAGS[@]}" \
     -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_open,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_index_build,_vp_index_count,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_extract,_vp_last_ticks,_vp_pixels \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
-    -o "$PACKAGE_ROOT/voidplayer-core.js"
+    -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
 # ---------------------------------------------------------------------------
 # Licenses, manifest, archive
