@@ -54,6 +54,34 @@ VoidPlayer does not ship:
 | Windows x64 | D3D11VA / D3D12VA / DXVA2 | SFTP via static libssh |
 | macOS arm64 | VideoToolbox | none |
 
+## WASM decoder core (web prototype)
+
+`scripts/build-wasm.sh` builds a trimmed single-threaded Emscripten core for
+the browser prototype's fallback decode path — containers and codecs the
+browser cannot handle through mediabunny/WebCodecs (FFV1, MPEG-1/2, MPEG-4 ASP,
+MJPEG, ProRes, and H.266/VVC, which requires FFmpeg ≥ 7.1; this build uses
+`n9.0.1` from the `Nakiha/FFmpeg` fork).
+
+Unlike the desktop packages, this target ships no FFmpeg CLI: `wasm/vp_decoder.c`
+links `avcodec`/`avformat`/`avutil`/`swscale` directly and exposes a small
+`vp_*` API (open, build frame index, extract exact-PTS frames as RGBA) plus
+Emscripten `FS`/`ccall`. Audio, filters, encoders, muxers and network are
+disabled. The resulting wasm is ~2.6 MB versus ~32 MB for the stock
+`@ffmpeg/core` build.
+
+Prerequisites: an Emscripten SDK with `emcc` on `PATH`, or a checkout under
+`.toolchains/emsdk` (`./emsdk install latest && ./emsdk activate latest`).
+
+```bash
+bash scripts/build-wasm.sh                # n9.0.1 from the Nakiha/FFmpeg fork
+bash scripts/build-wasm.sh --ffmpeg-ref n8.1
+node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 [sample ...]
+```
+
+The Node harness smoke-tests module loading and garbage rejection without
+samples, and verifies frame-exact index/extract with real sample files when
+given their paths.
+
 ## Build Locally -- Windows
 
 Run from a Visual Studio Developer PowerShell on Windows:

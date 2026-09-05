@@ -105,6 +105,55 @@ jobs:
           files: dist/voidplayer-ffmpeg-macos-arm64-${{ env.FFMPEG_REF }}.zip
           fail_on_unmatched_files: true
 
+  wasm:
+    name: WASM decoder core
+    runs-on: ubuntu-24.04
+    env:
+      FFMPEG_REF: ${{ github.event.inputs.ffmpeg_ref || 'n9.0.1' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Build WASM core
+        run: |
+          chmod +x scripts/build-wasm.sh
+          bash scripts/build-wasm.sh \
+            --ffmpeg-ref "$FFMPEG_REF" \
+            --clean
+
+      - name: Smoke test core
+        run: node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}
+          path: |
+            dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}.zip
+            dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}/voidplayer-ffmpeg-manifest.json
+          if-no-files-found: error
+
+      - name: Publish release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}
+          name: VoidPlayer FFmpeg WASM ${{ env.FFMPEG_REF }}
+          files: dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}.zip
+          fail_on_unmatched_files: true
+
   windows-x64-msvc:
     name: Windows x64 MSVC
     runs-on: windows-2022
