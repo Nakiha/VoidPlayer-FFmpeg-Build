@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef VP_MT
+#include <emscripten/threading.h>
+#endif
+
 #define VP_EOF 0
 #define VP_OK 1
 #define VP_MISMATCH 2
@@ -105,6 +109,12 @@ int vp_open(VPContext *ctx, const char *path) {
 
     ctx->dec = avcodec_alloc_context3(codec);
     if (!ctx->dec) return VP_ERR;
+#ifdef VP_MT
+    // av_cpu_count() cannot see the host under Emscripten (always returns 1),
+    // which silently pins VVC's own task executor to one thread. Hand the
+    // decoder the real core count in the pthreads build.
+    ctx->dec->thread_count = emscripten_num_logical_cores();
+#endif
     AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
     if (avcodec_parameters_to_context(ctx->dec, stream->codecpar) < 0) return VP_ERR;
     if (avcodec_open2(ctx->dec, codec, NULL) < 0) return VP_ERR;

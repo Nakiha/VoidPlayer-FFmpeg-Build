@@ -76,9 +76,19 @@ Prerequisites: an Emscripten SDK with `emcc` on `PATH`, or a checkout under
 
 ```bash
 bash scripts/build-wasm.sh                # n9.0.1 from the Nakiha/FFmpeg fork
+bash scripts/build-wasm.sh --mt           # multi-threaded variant (pthreads)
 bash scripts/build-wasm.sh --ffmpeg-ref n8.1
 node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 [sample ...]
 ```
+
+The `--mt` variant (`voidplayer-core-mt.*`) uses Emscripten pthreads and needs
+the host page to be cross-origin isolated (COOP `same-origin` + COEP
+`require-corp`) for SharedArrayBuffer; `wasm/vp_decoder.c` hands decoders the
+real core count because `av_cpu_count()` always reports 1 under Emscripten.
+Measured on H.266 1080p: ~26 ms/frame single-threaded, ~7 ms/frame
+multi-threaded. The web client tries the mt core first when isolated and falls
+back to the single-threaded core on failure or a 5 s init timeout (nested
+pthread workers can wedge silently in some WebKit versions).
 
 The Node harness smoke-tests module loading and garbage rejection without
 samples, and verifies frame-exact index/extract with real sample files when

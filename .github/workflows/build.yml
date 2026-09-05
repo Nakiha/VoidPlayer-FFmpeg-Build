@@ -132,9 +132,14 @@ jobs:
           bash scripts/build-wasm.sh \
             --ffmpeg-ref "$FFMPEG_REF" \
             --clean
+          bash scripts/build-wasm.sh \
+            --ffmpeg-ref "$FFMPEG_REF" \
+            --mt
 
       - name: Smoke test core
-        run: node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}"
+        run: |
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}"
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
@@ -143,6 +148,8 @@ jobs:
           path: |
             dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}.zip
             dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}/voidplayer-ffmpeg-manifest.json
+            dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}.zip
+            dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}/voidplayer-ffmpeg-manifest.json
           if-no-files-found: error
 
       - name: Publish release
@@ -151,7 +158,9 @@ jobs:
         with:
           tag_name: voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}
           name: VoidPlayer FFmpeg WASM ${{ env.FFMPEG_REF }}
-          files: dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}.zip
+          files: |
+            dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}.zip
+            dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}.zip
           fail_on_unmatched_files: true
 
   windows-x64-msvc:
