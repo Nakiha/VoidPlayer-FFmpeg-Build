@@ -1,0 +1,39 @@
+{
+  "name": "voidplayer-wasm",
+  "target": "wasm32-emscripten",
+  "toolchain": "emscripten",
+  "ffmpegRef": "n9.0.1",
+  "libraries": [
+    "avcodec",
+    "avformat",
+    "avutil",
+    "swscale"
+  ],
+  "demuxers": [
+    "avi",
+    "matroska",
+    "mov",
+    "mpegps",
+    "mpegts"
+  ],
+  "decoders": [
+    "ffv1",
+    "mjpeg",
+    "mpeg1video",
+    "mpeg2video",
+    "mpeg4",
+    "prores",
+    "vvc"
+  ],
+  "parsers": [
+    "ffv1",
+    "mjpeg",
+    "mpeg4video",
+    "mpegvideo",
+    "vvc"
+  ],
+  "protocols": [
+    "file"
+  ],
+  "notes": "Single-threaded Emscripten core for the web prototype fallback: codecs and containers the browser cannot handle natively. No audio, filters, encoders, network, or CLI. Direct vp_* C API in wasm/vp_decoder.c."
+}

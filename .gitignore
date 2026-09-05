@@ -6,3 +6,4 @@ dist/
 *.7z
 *.tar.gz
 *.log
+.toolchains/
