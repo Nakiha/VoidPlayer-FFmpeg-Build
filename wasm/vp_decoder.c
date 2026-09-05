@@ -7,8 +7,11 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavformat/avio.h>
 #include <libavutil/avutil.h>
 #include <libswscale/swscale.h>
+
+#include <emscripten.h>
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -49,7 +52,48 @@ typedef struct VPContext {
     int64_t last_ticks;      // pts of the frame currently in pixels
     int have_frame;          // pixels holds last_ticks
     int decode_eof;          // decoder drained; further reads yield nothing
+
+    // Custom-IO input (blob chunks read on demand from JS); NULL for MEMFS.
+    struct VpBlobIO *io;
+    AVIOContext *pb;
 } VPContext;
+
+// Custom AVIO over a JS-side Blob: reads are synchronous in the hosting worker
+// (FileReaderSync), so no whole-file MEMFS copy ever exists.
+typedef struct VpBlobIO {
+    int handle;
+    int64_t size;
+    int64_t pos;
+} VpBlobIO;
+
+EM_JS(long, vp_js_read, (int handle, double offset, uint8_t *buf, int len), {
+    const entry = Module.vpBlobs.get(handle);
+    if (!entry) return -1;
+    const bytes = new Uint8Array(entry.reader.readAsArrayBuffer(entry.blob.slice(offset, offset + len)));
+    HEAPU8.set(bytes, buf);
+    return bytes.length;
+});
+
+static int vp_avio_read(void *opaque, uint8_t *buf, int size) {
+    VpBlobIO *io = (VpBlobIO *)opaque;
+    long got = vp_js_read(io->handle, (double)io->pos, buf, size);
+    if (got < 0) return AVERROR(EIO);
+    io->pos += got;
+    return got == 0 ? AVERROR_EOF : (int)got;
+}
+
+static int64_t vp_avio_seek(void *opaque, int64_t offset, int whence) {
+    VpBlobIO *io = (VpBlobIO *)opaque;
+    if (whence == AVSEEK_SIZE) return io->size;
+    int64_t pos;
+    if ((whence & 0xFFFF) == SEEK_SET) pos = offset;
+    else if ((whence & 0xFFFF) == SEEK_CUR) pos = io->pos + offset;
+    else if ((whence & 0xFFFF) == SEEK_END) pos = io->size + offset;
+    else return AVERROR(EINVAL);
+    if (pos < 0 || pos > io->size) return AVERROR(EINVAL);
+    io->pos = pos;
+    return pos;
+}
 
 static void vp_reset_decoder_state(VPContext *ctx) {
     ctx->decode_eof = 0;
@@ -112,15 +156,19 @@ void vp_close_input(VPContext *ctx) {
     ctx->sws = NULL;
     avcodec_free_context(&ctx->dec);
     avformat_close_input(&ctx->fmt);
+    if (ctx->pb) {
+        av_freep(&ctx->pb->buffer);
+        avio_context_free(&ctx->pb);
+    }
+    free(ctx->io);
+    ctx->io = NULL;
     ctx->stream_idx = -1;
     ctx->index_count = 0;
     vp_reset_decoder_state(ctx);
 }
 
-int vp_open(VPContext *ctx, const char *path) {
-    if (!ctx || !path) return VP_ERR;
-    vp_close_input(ctx);
-    if (avformat_open_input(&ctx->fmt, path, NULL, NULL) < 0) return VP_ERR;
+// Shared tail: stream selection, decoder open, geometry priming.
+static int vp_open_decoders(VPContext *ctx) {
     if (avformat_find_stream_info(ctx->fmt, NULL) < 0) return VP_ERR;
 
     const AVCodec *codec = NULL;
@@ -151,6 +199,43 @@ int vp_open(VPContext *ctx, const char *path) {
     avcodec_flush_buffers(ctx->dec);
     vp_reset_decoder_state(ctx);
     return 0;
+}
+
+int vp_open(VPContext *ctx, const char *path) {
+    if (!ctx || !path) return VP_ERR;
+    vp_close_input(ctx);
+    if (avformat_open_input(&ctx->fmt, path, NULL, NULL) < 0) return VP_ERR;
+    return vp_open_decoders(ctx);
+}
+
+// Opens a JS-side Blob through the custom AVIO (chunked, on-demand reads).
+int vp_open_blob(VPContext *ctx, int handle, int64_t size) {
+    if (!ctx || size <= 0) return VP_ERR;
+    vp_close_input(ctx);
+    VpBlobIO *io = malloc(sizeof(*io));
+    if (!io) return VP_ERR;
+    io->handle = handle;
+    io->size = size;
+    io->pos = 0;
+    const size_t buf_size = 256 * 1024;
+    uint8_t *buffer = av_malloc(buf_size);
+    if (!buffer) { free(io); return VP_ERR; }
+    AVIOContext *pb = avio_alloc_context(buffer, (int)buf_size, 0, io, vp_avio_read, NULL, vp_avio_seek);
+    if (!pb) { av_free(buffer); free(io); return VP_ERR; }
+    AVFormatContext *fmt = avformat_alloc_context();
+    if (!fmt) { avio_context_free(&pb); free(io); return VP_ERR; }
+    fmt->pb = pb;
+    fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
+        avio_context_free(&pb);
+        avformat_free_context(fmt);
+        free(io);
+        return VP_ERR;
+    }
+    ctx->io = io;
+    ctx->pb = pb;
+    ctx->fmt = fmt;
+    return vp_open_decoders(ctx);
 }
 
 int vp_width(VPContext *ctx) { return ctx && ctx->dec ? ctx->dec->width : 0; }

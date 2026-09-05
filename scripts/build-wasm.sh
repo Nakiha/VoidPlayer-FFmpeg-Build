@@ -178,7 +178,7 @@ step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_index_build,_vp_index_count,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_extract,_vp_last_ticks,_vp_pixels \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_index_build,_vp_index_count,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_extract,_vp_last_ticks,_vp_pixels \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
