@@ -53,6 +53,7 @@ static void vp_reset_decoder_state(VPContext *ctx) {
 }
 
 void vp_close_input(VPContext *ctx);
+static int vp_decode_one(VPContext *ctx);
 
 VPContext *vp_create(void) {
     VPContext *ctx = calloc(1, sizeof(VPContext));
@@ -107,6 +108,18 @@ int vp_open(VPContext *ctx, const char *path) {
     AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
     if (avcodec_parameters_to_context(ctx->dec, stream->codecpar) < 0) return VP_ERR;
     if (avcodec_open2(ctx->dec, codec, NULL) < 0) return VP_ERR;
+    vp_reset_decoder_state(ctx);
+    // Prime the decoder with real frames: streams like MPEG-2 in TS keep the
+    // sequence header (dimensions) in the bitstream, and the decoder must see
+    // it once before any mid-stream seek can succeed. avcodec_flush_buffers
+    // retains this state, so one warm-up decode covers all later seeks.
+    for (int tries = 0; tries < 200; tries++) {
+        if (vp_decode_one(ctx) != VP_OK) break;
+        if (ctx->frame->width > 0 && ctx->frame->height > 0) break;
+    }
+    if (ctx->frame->width <= 0 || ctx->frame->height <= 0) return VP_ERR;
+    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(ctx->dec);
     vp_reset_decoder_state(ctx);
     return 0;
 }
@@ -181,16 +194,38 @@ static int vp_decode_one(VPContext *ctx) {
 
 int vp_index_build(VPContext *ctx) {
     if (!ctx || !ctx->dec) return VP_ERR;
+    // Demux-only pass: packet pts/duration/key flags are enough for the index
+    // and avoid decoding the entire stream at load time (expensive for VVC).
+    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+    ctx->index_count = 0;
+    while (av_read_frame(ctx->fmt, ctx->pkt) >= 0) {
+        if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
+            int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
+            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration) < 0) {
+                av_packet_unref(ctx->pkt);
+                return VP_ERR;
+            }
+        }
+        av_packet_unref(ctx->pkt);
+    }
+    // Sort into presentation order, keeping key/duration paired with ticks.
+    for (size_t i = 1; i < ctx->index_count; i++) {
+        int64_t ticks = ctx->index_ticks[i];
+        int key = ctx->index_key[i];
+        int64_t duration = ctx->index_duration[i];
+        size_t j = i;
+        while (j > 0 && ctx->index_ticks[j - 1] > ticks) {
+            ctx->index_ticks[j] = ctx->index_ticks[j - 1];
+            ctx->index_key[j] = ctx->index_key[j - 1];
+            ctx->index_duration[j] = ctx->index_duration[j - 1];
+            j--;
+        }
+        ctx->index_ticks[j] = ticks;
+        ctx->index_key[j] = key;
+        ctx->index_duration[j] = duration;
+    }
     av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(ctx->dec);
-    vp_reset_decoder_state(ctx);
-    ctx->index_count = 0;
-    while (vp_decode_one(ctx) == VP_OK) {
-        int64_t ticks = ctx->frame->best_effort_timestamp;
-        if (ticks == AV_NOPTS_VALUE) continue;
-        int key = !!(ctx->frame->flags & AV_FRAME_FLAG_KEY);
-        if (vp_index_push(ctx, ticks, key, ctx->frame->duration) < 0) return VP_ERR;
-    }
     vp_reset_decoder_state(ctx);
     return (int)ctx->index_count;
 }
