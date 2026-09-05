@@ -253,6 +253,17 @@ const char *vp_codec_name(VPContext *ctx) {
     return ctx && ctx->dec ? avcodec_get_name(ctx->dec->codec_id) : "";
 }
 
+// Stream color metadata as FFmpeg enum ints; JS maps the handful it names.
+// Prefer the primed frame's bitstream values over the codec context, whose
+// fields can stay at container defaults.
+static int vp_pick(int frame_value, int dec_value, int unspecified) {
+    return frame_value != unspecified ? frame_value : dec_value;
+}
+int vp_color_primaries(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_primaries, ctx->dec ? ctx->dec->color_primaries : 2, AVCOL_PRI_UNSPECIFIED) : 2; }
+int vp_color_transfer(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_trc, ctx->dec ? ctx->dec->color_trc : 2, AVCOL_TRC_UNSPECIFIED) : 2; }
+int vp_color_space(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->colorspace, ctx->dec ? ctx->dec->colorspace : 2, AVCOL_SPC_UNSPECIFIED) : 2; }
+int vp_color_range(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_range, ctx->dec ? ctx->dec->color_range : 0, AVCOL_RANGE_UNSPECIFIED) : 0; }
+
 static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration) {
     if (ctx->index_count == ctx->index_capacity) {
         size_t capacity = ctx->index_capacity ? ctx->index_capacity * 2 : 1024;
