@@ -87,8 +87,8 @@ fi
 # ---------------------------------------------------------------------------
 
 DEMUXERS="mov matroska mpegts mpegps avi"
-DECODERS="ffv1 mpeg1video mpeg2video mpeg4 mjpeg prores vvc"
-PARSERS="ffv1 mpegvideo mpeg4video mjpeg vvc"
+DECODERS="ffv1 h264 hevc mpeg1video mpeg2video mpeg4 mjpeg prores vvc vp8 vp9"
+PARSERS="ffv1 h264 hevc mpegvideo mpeg4video mjpeg vvc vp8 vp9"
 
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"

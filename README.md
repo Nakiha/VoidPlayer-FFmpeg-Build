@@ -60,7 +60,9 @@ VoidPlayer does not ship:
 the browser prototype's fallback decode path — containers and codecs the
 browser cannot handle through mediabunny/WebCodecs (FFV1, MPEG-1/2, MPEG-4 ASP,
 MJPEG, ProRes, and H.266/VVC, which requires FFmpeg ≥ 7.1; this build uses
-`n9.0.1` from the `Nakiha/FFmpeg` fork).
+`n9.0.1` from the `Nakiha/FFmpeg` fork). H.264, HEVC, VP8 and VP9 are also
+included: browsers support those codecs only in specific profiles, so gaps like
+H.264 High 4:2:2 or HEVC 4:2:2/10-bit need the fallback too.
 
 Unlike the desktop packages, this target ships no FFmpeg CLI: `wasm/vp_decoder.c`
 links `avcodec`/`avformat`/`avutil`/`swscale` directly and exposes a small
