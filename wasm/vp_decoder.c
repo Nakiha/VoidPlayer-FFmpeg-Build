@@ -9,6 +9,7 @@
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 #include <libavutil/avutil.h>
+#include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
 #include <emscripten.h>
@@ -253,6 +254,14 @@ const char *vp_codec_name(VPContext *ctx) {
     return ctx && ctx->dec ? avcodec_get_name(ctx->dec->codec_id) : "";
 }
 
+// Report the decoder's source format before the RGBA presentation conversion.
+const char *vp_pixel_format(VPContext *ctx) {
+    if (!ctx || !ctx->dec) return "";
+    enum AVPixelFormat fmt = ctx->frame->format >= 0 ? ctx->frame->format : ctx->dec->pix_fmt;
+    const char *name = av_get_pix_fmt_name(fmt);
+    return name ? name : "";
+}
+
 // Stream color metadata as FFmpeg enum ints; JS maps the handful it names.
 // Prefer the primed frame's bitstream values over the codec context, whose
 // fields can stay at container defaults.
@@ -455,3 +464,68 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
 
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
 uint8_t *vp_pixels(VPContext *ctx) { return ctx ? ctx->pixels : NULL; }
+
+// Packet-only decoder: TS owns demux, timestamps and seeking. Compressed data
+// is written directly into an AVPacket allocation, avoiding a second packet
+// copy inside the core. Call receive until EAGAIN before sending more input.
+int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
+    if (!ctx || !name || size < 0 || size > 1024 * 1024) return VP_ERR;
+    vp_close_input(ctx);
+    const AVCodec *codec = avcodec_find_decoder_by_name(!strcmp(name, "av1") ? "libdav1d" : name);
+    if (!codec) return VP_ERR;
+    ctx->dec = avcodec_alloc_context3(codec);
+    if (!ctx->dec) return VP_ERR;
+    ctx->dec->pkt_timebase = (AVRational){1, 1000000};
+    ctx->dec->thread_count = 1;
+#ifdef VP_MT
+    ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : 2;
+#endif
+    if (size) {
+        ctx->dec->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!ctx->dec->extradata) return VP_ERR;
+        memcpy(ctx->dec->extradata, extra, size);
+        ctx->dec->extradata_size = size;
+    }
+    return avcodec_open2(ctx->dec, codec, NULL) < 0 ? VP_ERR : 0;
+}
+
+uint8_t *vp_packet_alloc(VPContext *ctx, int size) {
+    if (!ctx || size <= 0 || size > 0xffffff) return NULL;
+    av_packet_unref(ctx->pkt);
+    if (av_new_packet(ctx->pkt, size) < 0) return NULL;
+    return ctx->pkt->data;
+}
+
+int vp_packet_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
+    if (!ctx || !ctx->dec) return VP_ERR;
+    ctx->pkt->pts = pts; ctx->pkt->dts = dts;
+    ctx->pkt->flags = key ? AV_PKT_FLAG_KEY : 0;
+    int ret = avcodec_send_packet(ctx->dec, eof ? NULL : ctx->pkt);
+    av_packet_unref(ctx->pkt);
+    return ret < 0 ? VP_ERR : 0;
+}
+
+int vp_packet_receive(VPContext *ctx, int64_t minimum_pts) {
+    if (!ctx || !ctx->dec) return VP_ERR;
+    for (;;) {
+        av_frame_unref(ctx->frame);
+        int ret = avcodec_receive_frame(ctx->dec, ctx->frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) return 0;
+        if (ret < 0) return VP_ERR;
+        int64_t pts = ctx->frame->best_effort_timestamp;
+        if (pts == AV_NOPTS_VALUE) pts = ctx->frame->pts;
+        if (pts < minimum_pts) continue;
+        if (vp_convert(ctx) < 0) return VP_ERR;
+        ctx->last_ticks = pts;
+        ctx->have_frame = 1;
+        return 1;
+    }
+}
+
+void vp_packet_reset(VPContext *ctx) {
+    if (!ctx || !ctx->dec) return;
+    avcodec_flush_buffers(ctx->dec);
+    av_packet_unref(ctx->pkt);
+    av_frame_unref(ctx->frame);
+    vp_reset_decoder_state(ctx);
+}

@@ -110,6 +110,22 @@ if $MT; then
     SIMD_CFLAGS="-msimd128 -pthread -DVP_MT"
 fi
 
+# dav1d supplies software AV1 for packet-fed FLV on browsers without AV1.
+DAV1D_SOURCE="$BUILD_ROOT/sources/dav1d-wasm"
+DAV1D_BUILD="$BUILD_ROOT/work/dav1d-wasm${SUFFIX}"
+DAV1D_INSTALL="$BUILD_ROOT/work/dav1d-wasm${SUFFIX}-install"
+if [ ! -d "$DAV1D_SOURCE" ]; then
+    step git clone --depth 1 --branch 1.5.1 https://github.com/videolan/dav1d.git "$DAV1D_SOURCE"
+fi
+step meson setup "$DAV1D_BUILD" "$DAV1D_SOURCE" --reconfigure \
+    --cross-file "$DAV1D_SOURCE/package/crossfiles/wasm32.meson" \
+    --prefix "$DAV1D_INSTALL" --libdir lib --default-library static --buildtype release \
+    -Denable_asm=false -Denable_tools=false -Denable_tests=false -Dc_args="$SIMD_CFLAGS"
+step meson compile -C "$DAV1D_BUILD"
+step meson install -C "$DAV1D_BUILD"
+export EM_PKG_CONFIG_PATH="$DAV1D_INSTALL/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+DECODERS="$DECODERS libdav1d"
+
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"
     "--cc=emcc"
@@ -133,6 +149,8 @@ FFMPEG_ARGS=(
     "--disable-network"
     "--disable-everything"
     "--disable-autodetect"
+    "--enable-libdav1d"
+    "--pkg-config=pkg-config"
     "--enable-avcodec"
     "--enable-avformat"
     "--enable-avutil"
@@ -170,7 +188,7 @@ fi
 step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
-    -lavformat -lavcodec -lswscale -lavutil \
+    -L"$DAV1D_INSTALL/lib" -lavformat -lavcodec -lswscale -lavutil -ldav1d \
     -sMODULARIZE=1 \
     -sEXPORT_ES6=1 \
     -sEXPORT_NAME=createVoidPlayerCore \
@@ -178,7 +196,7 @@ step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_count,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_extract,_vp_last_ticks,_vp_pixels \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_count,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
@@ -191,6 +209,7 @@ mkdir -p "$LICENSE_ROOT"
 for f in "$FFMPEG_SOURCE"/COPYING*; do
     [ -f "$f" ] && cp "$f" "$LICENSE_ROOT/$(basename "$f")"
 done
+cp "$DAV1D_SOURCE/COPYING" "$LICENSE_ROOT/dav1d-COPYING"
 for name in LICENSE.md README.md; do
     [ -f "$FFMPEG_SOURCE/$name" ] && cp "$FFMPEG_SOURCE/$name" "$LICENSE_ROOT/FFmpeg-$name"
 done
