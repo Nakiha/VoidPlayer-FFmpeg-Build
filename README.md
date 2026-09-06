@@ -210,3 +210,20 @@ otool -L dist/voidplayer-ffmpeg-macos-arm64-n8.1/lib/libavformat*.dylib
 ```
 
 The package intentionally does not include FFmpeg CLI binaries.
+
+### Packet-fed FLV decoding
+
+The web player's TS Worker owns FLV demuxing and seek indexes. The core exposes
+`vp_packet_open`, `vp_packet_alloc`, `vp_packet_send`, `vp_packet_receive` and
+`vp_packet_reset` for decoding already demuxed packets. No FLV demuxer is enabled.
+Packet timestamps use microseconds; callers drain receive before sending another
+packet, and restart from a suitable keyframe after reset. Packet storage is
+allocated by libavcodec (including padding); JS writes compressed bytes directly
+into that allocation. RGBA output keeps the existing reusable-buffer contract.
+
+`build-wasm.sh` also builds pinned dav1d 1.5.1 with Meson/Ninja for software AV1.
+It requires `meson`, `ninja` and `pkg-config` in addition to Emscripten. Both
+single-thread and `--mt` builds include dav1d and its license. Rebuild both
+variants before syncing the Web repo; no Flutter native artifacts are changed.
+
+WASM metadata: `vp_pixel_format(ctx)` exposes the source decoder pixel-format name before RGBA conversion. `vp_color_range` returns the FFmpeg enum unchanged: 0 unspecified, 1 limited/TV, 2 full/PC. These getters apply to both container and packet-fed contexts.
