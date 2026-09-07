@@ -15,6 +15,8 @@
 #include <emscripten.h>
 
 #include <stdint.h>
+#include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,6 +32,21 @@
 // Seeks instead of walking forward when the target is further ahead than this
 // many index frames; GOP-length agnostic approximation.
 #define VP_MAX_FORWARD_WALK 8
+
+// Versioned, immutable-until-next-output descriptor for the RGBA buffer.
+// All values describe the converted AVFrame, never a prefetched codec context.
+typedef struct VPFrameInfo {
+    int64_t pts;
+    int64_t duration;
+    uint32_t abi_version;
+    uint32_t descriptor_bytes;
+    int32_t width, height, stride, bytes;
+    int32_t source_format, primaries, transfer, matrix, range;
+    int32_t sar_num, sar_den;
+    uint32_t revision;
+} VPFrameInfo;
+_Static_assert(sizeof(VPFrameInfo) == 72, "frame ABI size");
+_Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 
 typedef struct VPContext {
     AVFormatContext *fmt;
@@ -50,6 +67,7 @@ typedef struct VPContext {
 
     uint8_t *pixels;
     size_t pixels_size;
+    VPFrameInfo output;
     int64_t last_ticks;      // pts of the frame currently in pixels
     int have_frame;          // pixels holds last_ticks
     int decode_eof;          // decoder drained; further reads yield nothing
@@ -376,6 +394,7 @@ int64_t vp_index_duration(VPContext *ctx, int i) {
 }
 
 static int vp_ensure_pixels(VPContext *ctx, int width, int height) {
+    if (width <= 0 || height <= 0 || width > INT_MAX / 4 || (uint64_t)width * height * 4 > INT_MAX) return VP_ERR;
     size_t needed = (size_t)width * (size_t)height * 4;
     if (ctx->pixels_size >= needed) return 0;
     uint8_t *pixels = realloc(ctx->pixels, needed);
@@ -409,8 +428,23 @@ static int vp_convert(VPContext *ctx) {
     if (vp_ensure_pixels(ctx, frame->width, frame->height) < 0) return VP_ERR;
     uint8_t *dst[4] = { ctx->pixels, NULL, NULL, NULL };
     int dst_stride[4] = { frame->width * 4, 0, 0, 0 };
-    sws_scale(ctx->sws, (const uint8_t *const *)frame->data, frame->linesize,
-              0, frame->height, dst, dst_stride);
+    if (sws_scale(ctx->sws, (const uint8_t *const *)frame->data, frame->linesize,
+              0, frame->height, dst, dst_stride) != frame->height) return VP_ERR;
+    VPFrameInfo next = {0};
+    next.pts = frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
+    next.duration = frame->duration;
+    next.abi_version = 1; next.descriptor_bytes = sizeof(VPFrameInfo);
+    next.width = frame->width; next.height = frame->height;
+    next.stride = frame->width * 4; next.bytes = next.stride * frame->height;
+    next.source_format = frame->format;
+    next.primaries = frame->color_primaries; next.transfer = frame->color_trc;
+    next.matrix = frame->colorspace; next.range = frame->color_range;
+    next.sar_num = frame->sample_aspect_ratio.num > 0 ? frame->sample_aspect_ratio.num : 1;
+    next.sar_den = frame->sample_aspect_ratio.den > 0 ? frame->sample_aspect_ratio.den : 1;
+    // Metadata revision survives decoder resets and configuration changes.
+    next.revision = ctx->output.revision;
+    if (!next.revision || memcmp(&next.width, &ctx->output.width, offsetof(VPFrameInfo, revision) - offsetof(VPFrameInfo, width))) next.revision++;
+    ctx->output = next;
     return 0;
 }
 
@@ -463,7 +497,12 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
 }
 
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
-uint8_t *vp_pixels(VPContext *ctx) { return ctx ? ctx->pixels : NULL; }
+uint8_t *vp_pixels(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->pixels : NULL; }
+const VPFrameInfo *vp_frame_info(VPContext *ctx) { return ctx && ctx->have_frame ? &ctx->output : NULL; }
+const char *vp_frame_format(VPContext *ctx) {
+    const char *name = ctx && ctx->have_frame ? av_get_pix_fmt_name(ctx->output.source_format) : NULL;
+    return name ? name : "";
+}
 
 // Packet-only decoder: TS owns demux, timestamps and seeking. Compressed data
 // is written directly into an AVPacket allocation, avoiding a second packet

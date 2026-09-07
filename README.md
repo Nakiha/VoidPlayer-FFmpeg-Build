@@ -227,3 +227,19 @@ single-thread and `--mt` builds include dav1d and its license. Rebuild both
 variants before syncing the Web repo; no Flutter native artifacts are changed.
 
 WASM metadata: `vp_pixel_format(ctx)` exposes the source decoder pixel-format name before RGBA conversion. `vp_color_range` returns the FFmpeg enum unchanged: 0 unspecified, 1 limited/TV, 2 full/PC. These getters apply to both container and packet-fed contexts.
+
+### Output frame ABI v1
+
+`vp_frame_info(ctx)` returns a 72-byte little-endian descriptor, valid only when
+`vp_extract` / `vp_packet_receive` has produced a frame. Offsets 0/8 hold signed
+64-bit PTS/duration (container timebase, or microseconds for packet mode); 16/20
+hold ABI version/size; 24..68 hold width, height, RGBA stride, valid byte length,
+source pixel format enum, color primaries/transfer/matrix/range, SAR numerator /
+denominator and metadata revision. `vp_frame_format` supplies the source format
+name. Pixel data from `vp_pixels` and this descriptor belong to the same AVFrame;
+copy both before sending/decoding again. Reset invalidates the pointer, and the
+revision changes when output metadata changes. Source color tags describe the
+input to swscale; RGBA uses RGB/full range and is not HDR tone-mapped.
+
+Validate both variants with `node scripts/test-frame-info.mjs <core.js> <fate-dir>`
+using the pinned multi-stsd H.264/HEVC MOV files from VoidPlayer-Web's sample list.
