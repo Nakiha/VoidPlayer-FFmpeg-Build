@@ -515,6 +515,7 @@ int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int s
     ctx->dec = avcodec_alloc_context3(codec);
     if (!ctx->dec) return VP_ERR;
     ctx->dec->pkt_timebase = (AVRational){1, 1000000};
+    ctx->dec->strict_std_compliance = FF_COMPLIANCE_STRICT;
     ctx->dec->thread_count = 1;
 #ifdef VP_MT
     ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : 2;
@@ -561,8 +562,12 @@ int vp_packet_receive(VPContext *ctx, int64_t minimum_pts) {
     }
 }
 
+// Some decoders keep a presentation FIFO after flush (HEVC in the pinned
+// FFmpeg revision). Empty residual output before accepting a new seek epoch.
 void vp_packet_reset(VPContext *ctx) {
     if (!ctx || !ctx->dec) return;
+    avcodec_flush_buffers(ctx->dec);
+    while (avcodec_receive_frame(ctx->dec, ctx->frame) >= 0) av_frame_unref(ctx->frame);
     avcodec_flush_buffers(ctx->dec);
     av_packet_unref(ctx->pkt);
     av_frame_unref(ctx->frame);

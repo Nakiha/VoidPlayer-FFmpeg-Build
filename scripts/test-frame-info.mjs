@@ -29,6 +29,8 @@ try {
     assert.equal(d.getInt32(32,true),w*4);assert.equal(d.getInt32(36,true),w*h*4);
     assert.ok(d.getUint32(68,true)>=revision);revision=d.getUint32(68,true);
     assert.ok(call('vp_pixels',['number'],[ctx])+w*h*4<=core.HEAPU8.byteLength);
+    call('vp_packet_reset',['number'],[ctx],null);
+    assert.equal(call('vp_packet_receive',['number','i64'],[ctx,BigInt(Number.MIN_SAFE_INTEGER)]),0,'reset must discard pending presentation FIFO');
    }
    call('vp_packet_reset',['number'],[ctx],null);assert.equal(call('vp_frame_info',['number'],[ctx]),0);
   }finally{call('vp_destroy',['number'],[ctx],null);}
