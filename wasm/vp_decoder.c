@@ -44,8 +44,11 @@ typedef struct VPFrameInfo {
     int32_t source_format, primaries, transfer, matrix, range;
     int32_t sar_num, sar_den;
     uint32_t revision;
+    int32_t layout, bit_depth, bit_shift, subsample_x, subsample_y, chroma_location;
+    struct { int32_t offset, stride, width, height; } planes[3];
+    int32_t crop_left, crop_top, crop_right, crop_bottom;
 } VPFrameInfo;
-_Static_assert(sizeof(VPFrameInfo) == 72, "frame ABI size");
+_Static_assert(sizeof(VPFrameInfo) == 160, "frame ABI size");
 _Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 
 typedef struct VPContext {
@@ -404,7 +407,7 @@ static int vp_ensure_pixels(VPContext *ctx, int width, int height) {
     return 0;
 }
 
-static int vp_convert(VPContext *ctx) {
+static int vp_convert_rgba(VPContext *ctx) {
     AVFrame *frame = ctx->frame;
     if (!ctx->sws || ctx->sws_width != frame->width || ctx->sws_height != frame->height ||
         ctx->sws_fmt != frame->format) {
@@ -430,12 +433,73 @@ static int vp_convert(VPContext *ctx) {
     int dst_stride[4] = { frame->width * 4, 0, 0, 0 };
     if (sws_scale(ctx->sws, (const uint8_t *const *)frame->data, frame->linesize,
               0, frame->height, dst, dst_stride) != frame->height) return VP_ERR;
-    VPFrameInfo next = {0};
+    return 0;
+}
+
+// ABI v2 owns tightly packed planes until the next output/reset/destroy.
+// Layout 1 is planar YUV, 2 is semiplanar UV, 0 is explicit swscale RGBA.
+static int vp_convert(VPContext *ctx) {
+    AVFrame *frame = ctx->frame;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
+    VPFrameInfo planes = {0};
+    int planar = desc && desc->nb_components == 3 &&
+        !(desc->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_PAL | AV_PIX_FMT_FLAG_BITSTREAM)) &&
+        (desc->flags & AV_PIX_FMT_FLAG_PLANAR) && desc->comp[0].plane == 0 && desc->comp[1].plane == 1 &&
+        (desc->comp[2].plane == 2 || desc->comp[2].plane == 1);
+    // Preserve existing HDR behavior until a high precision HDR renderer exists.
+    if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) planar = 0;
+    // Formats/colorimetry outside the SDR renderer remain visibly tagged RGBA
+    // fallback. Never reinterpret unsupported matrix/transfer as BT.709.
+    if (frame->colorspace != AVCOL_SPC_UNSPECIFIED && frame->colorspace != AVCOL_SPC_BT709 && frame->colorspace != AVCOL_SPC_BT470BG && frame->colorspace != AVCOL_SPC_SMPTE170M && frame->colorspace != AVCOL_SPC_BT2020_NCL) planar = 0;
+    if (frame->color_primaries != AVCOL_PRI_UNSPECIFIED && frame->color_primaries != AVCOL_PRI_BT709 && frame->color_primaries != AVCOL_PRI_BT470BG && frame->color_primaries != AVCOL_PRI_SMPTE170M && frame->color_primaries != AVCOL_PRI_BT2020) planar = 0;
+    if (frame->color_trc != AVCOL_TRC_UNSPECIFIED && frame->color_trc != AVCOL_TRC_BT709 && frame->color_trc != AVCOL_TRC_SMPTE170M && frame->color_trc != AVCOL_TRC_IEC61966_2_1 && frame->color_trc != AVCOL_TRC_BT2020_10 && frame->color_trc != AVCOL_TRC_BT2020_12) planar = 0;
+    int depth = desc ? desc->comp[0].depth : 0;
+    if (depth < 8 || depth > 16) planar = 0;
+    if (planar) {
+        int bytes = depth > 8 ? 2 : 1;
+        int semi = desc->comp[2].plane == 1;
+        for (int c = 0; c < 3; c++) {
+            if (desc->comp[c].depth != depth || desc->comp[c].shift != desc->comp[0].shift ||
+                desc->comp[c].step != bytes * (semi && c ? 2 : 1) ||
+                desc->comp[c].offset != (semi && c == 2 ? bytes : 0)) planar = 0;
+        }
+    }
+    if (planar) {
+        int bytes = depth > 8 ? 2 : 1, semi = desc->comp[2].plane == 1;
+        planes.layout = semi ? 2 : 1; planes.bit_depth = depth;
+        planes.bit_shift = desc->comp[0].shift;
+        planes.subsample_x = desc->log2_chroma_w; planes.subsample_y = desc->log2_chroma_h;
+        planes.chroma_location = frame->chroma_location;
+        int64_t total = 0;
+        for (int p = 0; p < (semi ? 2 : 3); p++) {
+            int w = p ? AV_CEIL_RSHIFT(frame->width, desc->log2_chroma_w) : frame->width;
+            int h = p ? AV_CEIL_RSHIFT(frame->height, desc->log2_chroma_h) : frame->height;
+            int64_t stride = (int64_t)w * bytes * (semi && p ? 2 : 1);
+            if (w <= 0 || h <= 0 || stride > INT_MAX || !frame->data[p] || llabs((int64_t)frame->linesize[p]) < stride) return VP_ERR;
+            planes.planes[p].offset = total; planes.planes[p].stride = stride;
+            planes.planes[p].width = w; planes.planes[p].height = h;
+            total += stride * h;
+            if (total > INT_MAX) return VP_ERR;
+        }
+        if (ctx->pixels_size < (size_t)total) {
+            uint8_t *data = realloc(ctx->pixels, total);
+            if (!data) return VP_ERR;
+            ctx->pixels = data; ctx->pixels_size = total;
+        }
+        for (int p = 0; p < (semi ? 2 : 3); p++)
+            for (int y = 0; y < planes.planes[p].height; y++)
+                memcpy(ctx->pixels + planes.planes[p].offset + (size_t)y * planes.planes[p].stride,
+                       frame->data[p] + (ptrdiff_t)y * frame->linesize[p], planes.planes[p].stride);
+        planes.bytes = total;
+    } else if (vp_convert_rgba(ctx) < 0) return VP_ERR;
+    VPFrameInfo next = planes;
     next.pts = frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
     next.duration = frame->duration;
-    next.abi_version = 1; next.descriptor_bytes = sizeof(VPFrameInfo);
+    next.abi_version = 2; next.descriptor_bytes = sizeof(VPFrameInfo);
     next.width = frame->width; next.height = frame->height;
-    next.stride = frame->width * 4; next.bytes = next.stride * frame->height;
+    if (!planar) { next.stride = frame->width * 4; next.bytes = next.stride * frame->height; }
+    next.crop_left = frame->crop_left; next.crop_top = frame->crop_top;
+    next.crop_right = frame->crop_right; next.crop_bottom = frame->crop_bottom;
     next.source_format = frame->format;
     next.primaries = frame->color_primaries; next.transfer = frame->color_trc;
     next.matrix = frame->colorspace; next.range = frame->color_range;
@@ -443,7 +507,7 @@ static int vp_convert(VPContext *ctx) {
     next.sar_den = frame->sample_aspect_ratio.den > 0 ? frame->sample_aspect_ratio.den : 1;
     // Metadata revision survives decoder resets and configuration changes.
     next.revision = ctx->output.revision;
-    if (!next.revision || memcmp(&next.width, &ctx->output.width, offsetof(VPFrameInfo, revision) - offsetof(VPFrameInfo, width))) next.revision++;
+    if (!next.revision || memcmp(&next.width, &ctx->output.width, sizeof(VPFrameInfo) - offsetof(VPFrameInfo, width))) next.revision++;
     ctx->output = next;
     return 0;
 }
