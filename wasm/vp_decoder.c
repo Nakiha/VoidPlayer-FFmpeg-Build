@@ -65,6 +65,9 @@ typedef struct VPContext {
     int64_t *index_ticks;
     int *index_key;
     int64_t *index_duration;
+    int64_t *index_dts;
+    int index_seek_anchors;
+    int extract_frames, extract_restarts;
     size_t index_count;
     size_t index_capacity;
 
@@ -168,6 +171,7 @@ void vp_destroy(VPContext *ctx) {
     free(ctx->index_ticks);
     free(ctx->index_key);
     free(ctx->index_duration);
+    free(ctx->index_dts);
     free(ctx->pixels);
     free(ctx);
 }
@@ -186,6 +190,8 @@ void vp_close_input(VPContext *ctx) {
     ctx->io = NULL;
     ctx->stream_idx = -1;
     ctx->index_count = 0;
+    ctx->index_seek_anchors = 0;
+    ctx->extract_frames = ctx->extract_restarts = 0;
     vp_reset_decoder_state(ctx);
 }
 
@@ -294,26 +300,29 @@ int vp_color_transfer(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_t
 int vp_color_space(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->colorspace, ctx->dec ? ctx->dec->colorspace : 2, AVCOL_SPC_UNSPECIFIED) : 2; }
 int vp_color_range(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_range, ctx->dec ? ctx->dec->color_range : 0, AVCOL_RANGE_UNSPECIFIED) : 0; }
 
-static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration) {
+static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration, int64_t dts) {
     if (ctx->index_count == ctx->index_capacity) {
         size_t capacity = ctx->index_capacity ? ctx->index_capacity * 2 : 1024;
+        // Commit each successful realloc before another allocation can fail.
+        // The context must remain destroyable on partial allocation failure.
         int64_t *ticks = realloc(ctx->index_ticks, capacity * sizeof(*ticks));
-        int *keys = realloc(ctx->index_key, capacity * sizeof(*keys));
-        int64_t *durations = realloc(ctx->index_duration, capacity * sizeof(*durations));
-        if (!ticks || !keys || !durations) {
-            free(ticks);
-            free(keys);
-            free(durations);
-            return VP_ERR;
-        }
+        if (!ticks) return VP_ERR;
         ctx->index_ticks = ticks;
+        int *keys = realloc(ctx->index_key, capacity * sizeof(*keys));
+        if (!keys) return VP_ERR;
         ctx->index_key = keys;
+        int64_t *durations = realloc(ctx->index_duration, capacity * sizeof(*durations));
+        if (!durations) return VP_ERR;
         ctx->index_duration = durations;
+        int64_t *decode_times = realloc(ctx->index_dts, capacity * sizeof(*decode_times));
+        if (!decode_times) return VP_ERR;
+        ctx->index_dts = decode_times;
         ctx->index_capacity = capacity;
     }
     ctx->index_ticks[ctx->index_count] = ticks;
     ctx->index_key[ctx->index_count] = key;
     ctx->index_duration[ctx->index_count] = duration;
+    ctx->index_dts[ctx->index_count] = dts;
     ctx->index_count++;
     return 0;
 }
@@ -353,10 +362,22 @@ int vp_index_build(VPContext *ctx) {
     // and avoid decoding the entire stream at load time (expensive for VVC).
     av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
     ctx->index_count = 0;
+    ctx->index_seek_anchors = 0;
     while (av_read_frame(ctx->fmt, ctx->pkt) >= 0) {
         if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
             int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
-            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration) < 0) {
+            // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
+            // own their index semantics (e.g. Matroska positions name clusters,
+            // not packets), so never overwrite their entries with packet offsets.
+            if (!strcmp(ctx->fmt->iformat->name, "mpegts") && key &&
+                    ctx->pkt->pos >= 0 && ctx->pkt->dts != AV_NOPTS_VALUE) {
+                if (av_add_index_entry(ctx->fmt->streams[ctx->stream_idx], ctx->pkt->pos,
+                        ctx->pkt->dts, ctx->pkt->size, 0, AVINDEX_KEYFRAME) < 0) {
+                    av_packet_unref(ctx->pkt); return VP_ERR;
+                }
+                ctx->index_seek_anchors++;
+            }
+            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts) < 0) {
                 av_packet_unref(ctx->pkt);
                 return VP_ERR;
             }
@@ -368,16 +389,19 @@ int vp_index_build(VPContext *ctx) {
         int64_t ticks = ctx->index_ticks[i];
         int key = ctx->index_key[i];
         int64_t duration = ctx->index_duration[i];
+        int64_t dts = ctx->index_dts[i];
         size_t j = i;
         while (j > 0 && ctx->index_ticks[j - 1] > ticks) {
             ctx->index_ticks[j] = ctx->index_ticks[j - 1];
             ctx->index_key[j] = ctx->index_key[j - 1];
             ctx->index_duration[j] = ctx->index_duration[j - 1];
+            ctx->index_dts[j] = ctx->index_dts[j - 1];
             j--;
         }
         ctx->index_ticks[j] = ticks;
         ctx->index_key[j] = key;
         ctx->index_duration[j] = duration;
+        ctx->index_dts[j] = dts;
     }
     av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(ctx->dec);
@@ -386,6 +410,9 @@ int vp_index_build(VPContext *ctx) {
 }
 
 int vp_index_count(VPContext *ctx) { return ctx ? (int)ctx->index_count : 0; }
+int vp_index_seek_anchors(VPContext *ctx) { return ctx ? ctx->index_seek_anchors : 0; }
+int vp_extract_frames(VPContext *ctx) { return ctx ? ctx->extract_frames : 0; }
+int vp_extract_restarts(VPContext *ctx) { return ctx ? ctx->extract_restarts : 0; }
 int64_t vp_index_ticks(VPContext *ctx, int i) {
     return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_ticks[i] : 0;
 }
@@ -517,6 +544,7 @@ static int vp_convert(VPContext *ctx) {
 // anything else seeks to the closest keyframe at or before the target.
 int vp_extract(VPContext *ctx, int64_t target_ticks) {
     if (!ctx || !ctx->dec) return VP_ERR;
+    ctx->extract_frames = ctx->extract_restarts = 0;
     if (ctx->have_frame && ctx->last_ticks == target_ticks) return VP_OK;
 
     int seek = ctx->decode_eof || target_ticks < ctx->last_ticks || !ctx->have_frame;
@@ -526,12 +554,24 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
         seek = (vp_index_lower_bound(ctx, target_ticks + 1) - ahead) > VP_MAX_FORWARD_WALK;
     }
     int restarted = 0;
+    int64_t seek_ticks = target_ticks;
+    if (ctx->index_count && ctx->index_seek_anchors) {
+        size_t anchor = vp_index_lower_bound(ctx, target_ticks);
+        if (anchor == ctx->index_count || ctx->index_ticks[anchor] > target_ticks) { if (anchor) anchor--; }
+        while (anchor && !ctx->index_key[anchor]) anchor--;
+        // One earlier GOP supplies open-GOP leading pictures and codec headers.
+        // Cost depends on GOP length, not the target's distance from file start.
+        if (anchor) { anchor--; while (anchor && !ctx->index_key[anchor]) anchor--; }
+        if (ctx->index_key[anchor] && ctx->index_dts[anchor] != AV_NOPTS_VALUE)
+            seek_ticks = ctx->index_dts[anchor];
+    }
     for (;;) {
         if (seek) {
             // Seek-by-byte-estimation demuxers (e.g. MPEG-TS) can land past
             // the target; on overshoot restart once from the beginning.
-            if (av_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : target_ticks,
+            if (av_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : seek_ticks,
                               AVSEEK_FLAG_BACKWARD) < 0) {
+                ctx->extract_restarts++;
                 av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
             }
             avcodec_flush_buffers(ctx->dec);
@@ -543,14 +583,15 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
         // byte-estimated seek landed past the target: retry once from the
         // beginning before giving up.
         if (ret == VP_EOF) {
-            if (!restarted) { restarted = 1; seek = 1; continue; }
+            if (!restarted) { ctx->extract_restarts++; restarted = 1; seek = 1; continue; }
             return VP_EOF;
         }
         if (ret != VP_OK) return VP_ERR;
+        ctx->extract_frames++;
         int64_t ticks = ctx->frame->best_effort_timestamp;
         if (ticks == AV_NOPTS_VALUE || ticks < target_ticks) continue;
         if (ticks > target_ticks) {
-            if (!restarted) { restarted = 1; seek = 1; continue; }
+            if (!restarted) { ctx->extract_restarts++; restarted = 1; seek = 1; continue; }
             return VP_MISMATCH;
         }
         if (vp_convert(ctx) < 0) return VP_ERR;
