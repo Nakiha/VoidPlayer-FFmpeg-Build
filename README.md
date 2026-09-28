@@ -66,7 +66,7 @@ H.264 High 4:2:2 or HEVC 4:2:2/10-bit need the fallback too.
 
 Unlike the desktop packages, this target ships no FFmpeg CLI: `wasm/vp_decoder.c`
 links `avcodec`/`avformat`/`avutil`/`swscale` directly and exposes a small
-`vp_*` API (open, build frame index, extract exact-PTS frames as RGBA) plus
+`vp_*` API (open, build/import/export a versioned 40-byte v2 frame index with PTS, DTS, packet positions, sizes, and MPEG-TS seek anchors; extract exact-PTS frames as RGBA) plus
 Emscripten `FS`/`ccall`. Audio, filters, encoders, muxers and network are
 disabled. The resulting wasm is ~2.6 MB versus ~32 MB for the stock
 `@ffmpeg/core` build.
@@ -243,3 +243,27 @@ input to swscale; RGBA uses RGB/full range and is not HDR tone-mapped.
 
 Validate both variants with `node scripts/test-frame-info.mjs <core.js> <fate-dir>`
 using the pinned multi-stsd H.264/HEVC MOV files from VoidPlayer-Web's sample list.
+
+### Indexed MPEG-TS seeking (Web v0.3.0)
+
+The container API already builds a presentation-time index with a demux-only
+scan. MPEG-TS now also records valid key-packet byte positions in libavformat's
+seek index and retains DTS alongside sorted PTS. Random extraction seeks by a
+keyframe's **DTS**, starting one GOP earlier for leading pictures. Other demuxers
+keep their own index semantics; Matroska cluster positions must not be replaced
+with packet offsets. Sequential extraction and the packet-only API are unchanged.
+
+`vp_index_seek_anchors` reports the number of usable TS key packets discovered.
+`vp_extract_frames` and `vp_extract_restarts` report decoded output frames and
+restarts from the beginning during the most recent extraction. Zero anchors is
+not an empty presentation index. Missing timestamps/positions and damaged or
+discontinuous streams can still use the conservative beginning-of-file fallback;
+the counters make that visible. Initial container indexing still scans the file.
+
+Run `node scripts/test-indexed-seek.mjs <core.js>` for each single/MT artifact.
+It generates 70 seconds of MPEG-2 TS with B-frames, compares random/backward/GOP
+edge results against all 1,750 sequentially decoded frames, and requires at most
+30 decoded frames per seek with no restart. Optionally pass an existing 70s/25fps
+TS after the glue path. Timing is reported, not used as a machine-specific gate.
+This regression reads the current 160-byte ABI v2 descriptor and hashes its valid
+pixel bytes, including raw YUV planes.

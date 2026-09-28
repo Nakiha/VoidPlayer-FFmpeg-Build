@@ -136,10 +136,19 @@ jobs:
             --ffmpeg-ref "$FFMPEG_REF" \
             --mt
 
+      - name: Create MPEG-TS seek regression sample
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          mkdir -p .build
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x90:rate=24" \
+            -frames:v 48 -an -c:v mpeg2video -g 12 -bf 2 -pix_fmt yuv420p \
+            -f mpegts .build/seek-regression.ts
+
       - name: Smoke test core
         run: |
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}"
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}"
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-${{ env.FFMPEG_REF }}" .build/seek-regression.ts
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-${{ env.FFMPEG_REF }}" .build/seek-regression.ts
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
