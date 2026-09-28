@@ -56,6 +56,8 @@ try {
         assert.equal(call('vp_index_export_range', ['number', 'number', 'number', 'number', 'number'],
           [ctx, streamedCount, count, ptr, bytes]), count);
         const records = core.HEAPU8.slice(ptr, ptr + bytes);
+        const batchSafeTicks = new DataView(core.HEAPU8.buffer).getBigInt64(ptr + (count - 1) * 40, true);
+        assert.ok(batchSafeTicks <= safeTicks, 'a batch frontier cannot exceed the decoder frontier');
         if (streamSeq === 0 && count > 1) {
           const view = new DataView(core.HEAPU8.buffer);
           const firstPts = view.getBigInt64(ptr, true);
@@ -63,7 +65,7 @@ try {
           view.setBigInt64(ptr + 40, firstPts - 1n, true);
           assert.equal(call('vp_index_import_batch',
             ['number', 'number', 'number', 'number', 'i64', 'number'],
-            [importCtx, ptr, count, streamSeq, safeTicks, 0]), -1,
+            [importCtx, ptr, count, streamSeq, batchSafeTicks, 0]), -1,
             'an out-of-order record must be rejected before append');
           view.setBigInt64(ptr + 40, secondPts, true);
         }
@@ -75,14 +77,14 @@ try {
           view.setBigInt64(ptr, previousPts - 1n, true);
           assert.equal(call('vp_index_import_batch',
             ['number', 'number', 'number', 'number', 'i64', 'number'],
-            [importCtx, ptr, count, streamSeq, safeTicks, 0]), -1,
+            [importCtx, ptr, count, streamSeq, batchSafeTicks, 0]), -1,
             'a batch that inserts before the published prefix must be rejected');
           view.setBigInt64(ptr, originalPts, true);
         }
                 assert.equal(call('vp_index_import_batch',
           ['number', 'number', 'number', 'number', 'i64', 'number'],
-          [importCtx, ptr, count, streamSeq, safeTicks, 0]), count);
-        streamedBatches.push({ records, count, safeTicks });
+          [importCtx, ptr, count, streamSeq, batchSafeTicks, 0]), count);
+        streamedBatches.push({ records, count, safeTicks: batchSafeTicks });
       } finally { core._free(ptr); }
       streamedCount += count;
       streamSeq++;
@@ -93,7 +95,7 @@ try {
           'a skipped batch sequence must be rejected');
         assert.equal(call('vp_index_import_batch',
           ['number', 'number', 'number', 'number', 'i64', 'number'],
-          [importCtx, 0, 0, streamSeq, safeTicks - 1n, 0]), -1,
+          [importCtx, 0, 0, streamSeq, streamedBatches[streamedBatches.length - 1].safeTicks - 1n, 0]), -1,
           'a regressing safe frontier must be rejected');
       }
       assert.equal(call('vp_index_count', ['number'], [importCtx]), streamedCount,
@@ -171,7 +173,7 @@ try {
   assert.equal(call('vp_index_count', ['number'], [importCtx]), count);
   assert.ok(call('vp_index_seek_anchors', ['number'], [ctx]) >= 140);
   assert.ok(call('vp_index_seek_anchors', ['number'], [importCtx]) >= 140);
-  const targets = [1600, 250, 900, 1749, 0, 11, 12, 13, 23, 24, 25, 250];
+  const targets = [1600, 250, 900, 1749, 80, 0, 11, 12, 13, 23, 24, 25, 250];
   const oracle = new Map();
   const ticks = i => call('vp_index_ticks', ['number', 'number'], [ctx, i], 'i64');
   assert.equal(ticks(0), BigInt(primedTicks), 'the stable origin is the first displayable indexed frame');
