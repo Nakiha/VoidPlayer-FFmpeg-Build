@@ -836,6 +836,9 @@ int vp_index_import_batch(VPContext *ctx, const void *input, int count, int seq,
         if (record.flags & VP_INDEX_FLAG_SEEK_ANCHOR) anchors++;
         previous = record.pts;
     }
+    if (count > 0 && safe_ticks != previous) return VP_ERR;
+    if (count == 0 && ctx->index_import_has_safe_ticks &&
+        safe_ticks != ctx->index_import_safe_ticks) return VP_ERR;
     if (ctx->index_count + (size_t)count > (size_t)(INT_MAX / (int)sizeof(int64_t)) ||
         vp_index_reserve(ctx, ctx->index_count + (size_t)count) < 0) return VP_ERR;
 
