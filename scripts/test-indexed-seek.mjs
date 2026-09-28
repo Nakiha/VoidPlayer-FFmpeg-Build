@@ -56,11 +56,11 @@ try {
   assert.ok(steps > 1, 'the test must exercise multiple scan steps');
   const count = call('vp_index_count', ['number'], [ctx]);
   assert.equal(count, 1750);
-  assert.equal(ticks(0), BigInt(primedTicks), 'the stable origin is the first displayable indexed frame');
   assert.ok(call('vp_index_seek_anchors', ['number'], [ctx]) >= 140);
   const targets = [1600, 250, 900, 1749, 0, 11, 12, 13, 23, 24, 25, 250];
   const oracle = new Map();
   const ticks = i => call('vp_index_ticks', ['number', 'number'], [ctx, i], 'i64');
+  assert.equal(ticks(0), BigInt(primedTicks), 'the stable origin is the first displayable indexed frame');
   function extract(i) {
     const target = ticks(i);
     assert.equal(call('vp_extract', ['number', 'i64'], [ctx, target]), 1, `frame ${i}`);
