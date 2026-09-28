@@ -54,3 +54,14 @@ jobs:
         run: |
           node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.1" .build/seek-regression.ts
           node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.1" --stem voidplayer-core-mt .build/seek-regression.ts
+
+      - name: Create long B-frame TS sample
+        run: |
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=128x96:rate=25" \
+            -t 70 -an -c:v mpeg2video -threads 1 -g 12 -bf 2 -muxrate 2000000 \
+            -f mpegts .build/indexed-seek-regression.ts
+
+      - name: Test pre-index first frame, scan progress, and random-seek pixels
+        run: |
+          node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js .build/indexed-seek-regression.ts
+          node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js .build/indexed-seek-regression.ts
