@@ -53,4 +53,4 @@ jobs:
       - name: Test import, seek anchors, and random-seek pixels
         run: |
           node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.1" .build/seek-regression.ts
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.1" .build/seek-regression.ts
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.1" --stem voidplayer-core-mt .build/seek-regression.ts

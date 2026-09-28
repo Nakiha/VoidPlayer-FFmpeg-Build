@@ -1,5 +1,5 @@
 // Node smoke/integration harness for the WASM decoder core.
-// Usage: node scripts/test-wasm-node.cjs <core-dir> [sample-file ...]
+// Usage: node scripts/test-wasm-node.cjs <core-dir> [--stem <core-stem>] [sample-file ...]
 // Without sample files it only checks that the module loads and rejects
 // garbage input. Sample files (absolute paths) get a full index + extract
 // verification.
@@ -10,14 +10,22 @@ const crypto = require('crypto');
 
 async function main() {
   const coreDir = process.argv[2];
-  const samples = process.argv.slice(3);
+  const args = process.argv.slice(3);
+  let coreStem = 'voidplayer-core';
+  const stemIndex = args.indexOf('--stem');
+  if (stemIndex >= 0) {
+    if (!args[stemIndex + 1] || !/^[a-z0-9-]+$/i.test(args[stemIndex + 1])) throw new Error('invalid --stem');
+    coreStem = args[stemIndex + 1];
+    args.splice(stemIndex, 2);
+  }
+  const samples = args;
   if (!coreDir) {
-    console.error('usage: node scripts/test-wasm-node.cjs <core-dir> [sample-file ...]');
+    console.error('usage: node scripts/test-wasm-node.cjs <core-dir> [--stem <core-stem>] [sample-file ...]');
     process.exit(1);
   }
   const { pathToFileURL } = require('url');
-  const glue = path.join(coreDir, 'voidplayer-core.js');
-  const wasm = fs.readFileSync(path.join(coreDir, 'voidplayer-core.wasm'));
+  const glue = path.join(coreDir, coreStem + '.js');
+  const wasm = fs.readFileSync(path.join(coreDir, coreStem + '.wasm'));
   const create = (await import(pathToFileURL(glue).href)).default;
   const core = await create({ wasmBinary: wasm });
 
