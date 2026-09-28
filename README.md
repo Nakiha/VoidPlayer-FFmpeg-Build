@@ -66,7 +66,7 @@ H.264 High 4:2:2 or HEVC 4:2:2/10-bit need the fallback too.
 
 Unlike the desktop packages, this target ships no FFmpeg CLI: `wasm/vp_decoder.c`
 links `avcodec`/`avformat`/`avutil`/`swscale` directly and exposes a small
-`vp_*` API (open, build frame index, extract exact-PTS frames as RGBA) plus
+`vp_*` API (open, build/import/export a versioned 40-byte v2 frame index with PTS, DTS, packet positions, sizes, and MPEG-TS seek anchors; extract exact-PTS frames as RGBA) plus
 Emscripten `FS`/`ccall`. Audio, filters, encoders, muxers and network are
 disabled. The resulting wasm is ~2.6 MB versus ~32 MB for the stock
 `@ffmpeg/core` build.

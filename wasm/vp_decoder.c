@@ -51,6 +51,23 @@ typedef struct VPFrameInfo {
 _Static_assert(sizeof(VPFrameInfo) == 160, "frame ABI size");
 _Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 
+// Index ABI v2 preserves presentation order and demux seek metadata.
+// flags bit 0 is key; bit 1 is a demuxer-safe seek anchor.
+typedef struct VPIndexRecordV2 {
+    int64_t pts;
+    int64_t dts;
+    int64_t duration;
+    int64_t pos;
+    int32_t packet_size;
+    uint32_t flags;
+} VPIndexRecordV2;
+_Static_assert(sizeof(VPIndexRecordV2) == 40, "index ABI v2 record size");
+_Static_assert(offsetof(VPIndexRecordV2, dts) == 8, "index ABI v2 dts offset");
+_Static_assert(offsetof(VPIndexRecordV2, duration) == 16, "index ABI v2 duration offset");
+_Static_assert(offsetof(VPIndexRecordV2, pos) == 24, "index ABI v2 position offset");
+_Static_assert(offsetof(VPIndexRecordV2, packet_size) == 32, "index ABI v2 packet size offset");
+_Static_assert(offsetof(VPIndexRecordV2, flags) == 36, "index ABI v2 flags offset");
+
 typedef struct VPContext {
     AVFormatContext *fmt;
     AVCodecContext *dec;
@@ -66,6 +83,8 @@ typedef struct VPContext {
     int *index_key;
     int64_t *index_duration;
     int64_t *index_dts;
+    int64_t *index_pos;
+    int *index_packet_size;
     int index_seek_anchors;
     int extract_frames, extract_restarts;
     size_t index_count;
@@ -172,6 +191,8 @@ void vp_destroy(VPContext *ctx) {
     free(ctx->index_key);
     free(ctx->index_duration);
     free(ctx->index_dts);
+    free(ctx->index_pos);
+    free(ctx->index_packet_size);
     free(ctx->pixels);
     free(ctx);
 }
@@ -300,14 +321,14 @@ int vp_color_transfer(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_t
 int vp_color_space(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->colorspace, ctx->dec ? ctx->dec->colorspace : 2, AVCOL_SPC_UNSPECIFIED) : 2; }
 int vp_color_range(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_range, ctx->dec ? ctx->dec->color_range : 0, AVCOL_RANGE_UNSPECIFIED) : 0; }
 
-static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration, int64_t dts) {
+static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration,
+                         int64_t dts, int64_t pos, int packet_size) {
     if (ctx->index_count == ctx->index_capacity) {
         size_t capacity = ctx->index_capacity ? ctx->index_capacity * 2 : 1024;
-        // Commit each successful realloc before another allocation can fail.
-        // The context must remain destroyable on partial allocation failure.
-        int64_t *ticks = realloc(ctx->index_ticks, capacity * sizeof(*ticks));
-        if (!ticks) return VP_ERR;
-        ctx->index_ticks = ticks;
+        if (capacity < ctx->index_capacity || capacity > (size_t)(INT_MAX / (int)sizeof(int64_t))) return VP_ERR;
+        int64_t *ticks_array = realloc(ctx->index_ticks, capacity * sizeof(*ticks_array));
+        if (!ticks_array) return VP_ERR;
+        ctx->index_ticks = ticks_array;
         int *keys = realloc(ctx->index_key, capacity * sizeof(*keys));
         if (!keys) return VP_ERR;
         ctx->index_key = keys;
@@ -317,12 +338,20 @@ static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duratio
         int64_t *decode_times = realloc(ctx->index_dts, capacity * sizeof(*decode_times));
         if (!decode_times) return VP_ERR;
         ctx->index_dts = decode_times;
+        int64_t *positions = realloc(ctx->index_pos, capacity * sizeof(*positions));
+        if (!positions) return VP_ERR;
+        ctx->index_pos = positions;
+        int *sizes = realloc(ctx->index_packet_size, capacity * sizeof(*sizes));
+        if (!sizes) return VP_ERR;
+        ctx->index_packet_size = sizes;
         ctx->index_capacity = capacity;
     }
     ctx->index_ticks[ctx->index_count] = ticks;
     ctx->index_key[ctx->index_count] = key;
     ctx->index_duration[ctx->index_count] = duration;
     ctx->index_dts[ctx->index_count] = dts;
+    ctx->index_pos[ctx->index_count] = pos;
+    ctx->index_packet_size[ctx->index_count] = packet_size;
     ctx->index_count++;
     return 0;
 }
@@ -377,7 +406,7 @@ int vp_index_build(VPContext *ctx) {
                 }
                 ctx->index_seek_anchors++;
             }
-            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts) < 0) {
+            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts, ctx->pkt->pos, ctx->pkt->size) < 0) {
                 av_packet_unref(ctx->pkt);
                 return VP_ERR;
             }
@@ -390,18 +419,24 @@ int vp_index_build(VPContext *ctx) {
         int key = ctx->index_key[i];
         int64_t duration = ctx->index_duration[i];
         int64_t dts = ctx->index_dts[i];
+        int64_t pos = ctx->index_pos[i];
+        int packet_size = ctx->index_packet_size[i];
         size_t j = i;
         while (j > 0 && ctx->index_ticks[j - 1] > ticks) {
             ctx->index_ticks[j] = ctx->index_ticks[j - 1];
             ctx->index_key[j] = ctx->index_key[j - 1];
             ctx->index_duration[j] = ctx->index_duration[j - 1];
             ctx->index_dts[j] = ctx->index_dts[j - 1];
+            ctx->index_pos[j] = ctx->index_pos[j - 1];
+            ctx->index_packet_size[j] = ctx->index_packet_size[j - 1];
             j--;
         }
         ctx->index_ticks[j] = ticks;
         ctx->index_key[j] = key;
         ctx->index_duration[j] = duration;
         ctx->index_dts[j] = dts;
+        ctx->index_pos[j] = pos;
+        ctx->index_packet_size[j] = packet_size;
     }
     av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(ctx->dec);
@@ -421,6 +456,120 @@ int vp_index_is_key(VPContext *ctx, int i) {
 }
 int64_t vp_index_duration(VPContext *ctx, int i) {
     return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
+}
+
+#define VP_INDEX_FLAG_KEY 1u
+#define VP_INDEX_FLAG_SEEK_ANCHOR 2u
+#define VP_INDEX_KNOWN_FLAGS (VP_INDEX_FLAG_KEY | VP_INDEX_FLAG_SEEK_ANCHOR)
+
+#ifndef VP_CORE_BUILD_ID
+#define VP_CORE_BUILD_ID "unknown"
+#endif
+const char *vp_core_build_id(void) { return VP_CORE_BUILD_ID; }
+int vp_stream_index(VPContext *ctx) { return ctx && ctx->stream_idx >= 0 ? ctx->stream_idx : -1; }
+
+int vp_index_abi_version(void) { return 2; }
+int vp_index_record_bytes(void) { return (int)sizeof(VPIndexRecordV2); }
+int vp_index_export_bytes(VPContext *ctx) {
+    if (!ctx || ctx->index_count > (size_t)(INT_MAX / (int)sizeof(VPIndexRecordV2))) return VP_ERR;
+    return (int)(ctx->index_count * sizeof(VPIndexRecordV2));
+}
+
+static uint32_t vp_index_record_flags(VPContext *ctx, size_t i) {
+    uint32_t flags = ctx->index_key[i] ? VP_INDEX_FLAG_KEY : 0u;
+    if (flags && ctx->fmt && ctx->fmt->iformat &&
+        !strcmp(ctx->fmt->iformat->name, "mpegts") &&
+        ctx->index_pos[i] >= 0 && ctx->index_packet_size[i] >= 0 &&
+        ctx->index_dts[i] != AV_NOPTS_VALUE) flags |= VP_INDEX_FLAG_SEEK_ANCHOR;
+    return flags;
+}
+
+int vp_index_export(VPContext *ctx, void *output, int capacity_bytes) {
+    int bytes = vp_index_export_bytes(ctx);
+    if (bytes <= 0 || !output || capacity_bytes < bytes) return VP_ERR;
+    uint8_t *dst = (uint8_t *)output;
+    for (size_t i = 0; i < ctx->index_count; i++) {
+        VPIndexRecordV2 record = {
+            .pts = ctx->index_ticks[i],
+            .dts = ctx->index_dts[i],
+            .duration = ctx->index_duration[i],
+            .pos = ctx->index_pos[i],
+            .packet_size = ctx->index_packet_size[i],
+            .flags = vp_index_record_flags(ctx, i)
+        };
+        memcpy(dst + i * sizeof(record), &record, sizeof(record));
+    }
+    return (int)ctx->index_count;
+}
+
+int vp_index_import(VPContext *ctx, const void *input, int count) {
+    if (!ctx || !ctx->dec || !ctx->fmt || ctx->stream_idx < 0 || !input || count <= 0 ||
+        count > INT_MAX / (int)sizeof(VPIndexRecordV2) || ctx->index_count != 0 ||
+        ctx->index_seek_anchors != 0) return VP_ERR;
+
+    size_t n = (size_t)count;
+    int64_t *ticks = malloc(n * sizeof(*ticks));
+    int *keys = malloc(n * sizeof(*keys));
+    int64_t *durations = malloc(n * sizeof(*durations));
+    int64_t *decode_times = malloc(n * sizeof(*decode_times));
+    int64_t *positions = malloc(n * sizeof(*positions));
+    int *sizes = malloc(n * sizeof(*sizes));
+    if (!ticks || !keys || !durations || !decode_times || !positions || !sizes) {
+        free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
+        return VP_ERR;
+    }
+
+    int is_mpegts = ctx->fmt->iformat && !strcmp(ctx->fmt->iformat->name, "mpegts");
+    const uint8_t *src = (const uint8_t *)input;
+    int64_t previous = 0;
+    int anchors = 0;
+    for (size_t i = 0; i < n; i++) {
+        VPIndexRecordV2 record;
+        memcpy(&record, src + i * sizeof(record), sizeof(record));
+        if ((record.flags & ~VP_INDEX_KNOWN_FLAGS) != 0 || record.packet_size < 0 ||
+            record.pos < -1 ||
+            ((record.flags & VP_INDEX_FLAG_SEEK_ANCHOR) &&
+                (!(record.flags & VP_INDEX_FLAG_KEY) || !is_mpegts || record.pos < 0 ||
+                 record.dts == AV_NOPTS_VALUE)) ||
+            (i > 0 && record.pts < previous)) {
+            free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
+            return VP_ERR;
+        }
+        ticks[i] = record.pts;
+        keys[i] = (record.flags & VP_INDEX_FLAG_KEY) != 0;
+        durations[i] = record.duration;
+        decode_times[i] = record.dts;
+        positions[i] = record.pos;
+        sizes[i] = record.packet_size;
+        if (record.flags & VP_INDEX_FLAG_SEEK_ANCHOR) anchors++;
+        previous = record.pts;
+    }
+
+    // av_add_index_entry may allocate internally. On allocation failure the
+    // caller should discard this freshly opened context.
+    if (anchors) {
+        AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
+        for (size_t i = 0; i < n; i++) {
+            VPIndexRecordV2 record;
+            memcpy(&record, src + i * sizeof(record), sizeof(record));
+            if (!(record.flags & VP_INDEX_FLAG_SEEK_ANCHOR)) continue;
+            if (av_add_index_entry(stream, positions[i], decode_times[i], sizes[i], 0, AVINDEX_KEYFRAME) < 0) {
+                free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
+                return VP_ERR;
+            }
+        }
+    }
+
+    free(ctx->index_ticks); free(ctx->index_key); free(ctx->index_duration);
+    free(ctx->index_dts); free(ctx->index_pos); free(ctx->index_packet_size);
+    ctx->index_ticks = ticks; ctx->index_key = keys; ctx->index_duration = durations;
+    ctx->index_dts = decode_times; ctx->index_pos = positions; ctx->index_packet_size = sizes;
+    ctx->index_count = n; ctx->index_capacity = n; ctx->index_seek_anchors = anchors;
+
+    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(ctx->dec);
+    vp_reset_decoder_state(ctx);
+    return count;
 }
 
 static int vp_ensure_pixels(VPContext *ctx, int width, int height) {
