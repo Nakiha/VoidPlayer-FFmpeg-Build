@@ -91,6 +91,7 @@ typedef struct VPContext {
     int index_scan_complete;
     int index_scan_error;
     int index_scan_packets;
+    int64_t index_scan_bytes;
     int extract_frames, extract_restarts;
     size_t index_count;
     size_t index_capacity;
@@ -222,6 +223,7 @@ void vp_close_input(VPContext *ctx) {
     ctx->index_scan_complete = 0;
     ctx->index_scan_error = 0;
     ctx->index_scan_packets = 0;
+    ctx->index_scan_bytes = 0;
     ctx->extract_frames = ctx->extract_restarts = 0;
     vp_reset_decoder_state(ctx);
 }
@@ -395,36 +397,78 @@ static int vp_decode_one(VPContext *ctx) {
     return VP_EOF;
 }
 
-static void vp_index_sort_presentation_order(VPContext *ctx) {
-    // Sort into presentation order while keeping all record fields paired.
-    for (size_t i = 1; i < ctx->index_count; i++) {
-        int64_t ticks = ctx->index_ticks[i];
-        int key = ctx->index_key[i];
-        int64_t duration = ctx->index_duration[i];
-        int64_t dts = ctx->index_dts[i];
-        int64_t pos = ctx->index_pos[i];
-        int packet_size = ctx->index_packet_size[i];
-        size_t j = i;
-        while (j > 0 && ctx->index_ticks[j - 1] > ticks) {
-            ctx->index_ticks[j] = ctx->index_ticks[j - 1];
-            ctx->index_key[j] = ctx->index_key[j - 1];
-            ctx->index_duration[j] = ctx->index_duration[j - 1];
-            ctx->index_dts[j] = ctx->index_dts[j - 1];
-            ctx->index_pos[j] = ctx->index_pos[j - 1];
-            ctx->index_packet_size[j] = ctx->index_packet_size[j - 1];
-            j--;
-        }
-        ctx->index_ticks[j] = ticks;
-        ctx->index_key[j] = key;
-        ctx->index_duration[j] = duration;
-        ctx->index_dts[j] = dts;
-        ctx->index_pos[j] = pos;
-        ctx->index_packet_size[j] = packet_size;
+typedef struct VPIndexSortKey {
+    int64_t ticks;
+    size_t source;
+} VPIndexSortKey;
+
+static int vp_index_sort_key_compare(const void *left, const void *right) {
+    const VPIndexSortKey *a = (const VPIndexSortKey *)left;
+    const VPIndexSortKey *b = (const VPIndexSortKey *)right;
+    if (a->ticks < b->ticks) return -1;
+    if (a->ticks > b->ticks) return 1;
+    // Original packet order is the stable tie-break for duplicate PTS values.
+    return a->source < b->source ? -1 : a->source > b->source ? 1 : 0;
+}
+
+static int vp_index_sort_presentation_order(VPContext *ctx) {
+    size_t count = ctx->index_count;
+    if (count < 2) return 0;
+    if (count > SIZE_MAX / sizeof(VPIndexSortKey)) return VP_ERR;
+    VPIndexSortKey *order = malloc(count * sizeof(*order));
+    if (!order) return VP_ERR;
+    for (size_t i = 0; i < count; i++) {
+        order[i].ticks = ctx->index_ticks[i];
+        order[i].source = i;
     }
+    qsort(order, count, sizeof(*order), vp_index_sort_key_compare);
+
+    // Apply the stable permutation in-place so peak memory stays bounded to
+    // one (PTS, source-index) key per record instead of duplicating all arrays.
+    for (size_t start = 0; start < count; start++) {
+        if (order[start].source == SIZE_MAX) continue;
+        if (order[start].source == start) {
+            order[start].source = SIZE_MAX;
+            continue;
+        }
+        int64_t saved_ticks = ctx->index_ticks[start];
+        int saved_key = ctx->index_key[start];
+        int64_t saved_duration = ctx->index_duration[start];
+        int64_t saved_dts = ctx->index_dts[start];
+        int64_t saved_pos = ctx->index_pos[start];
+        int saved_packet_size = ctx->index_packet_size[start];
+        size_t destination = start;
+        for (;;) {
+            size_t source = order[destination].source;
+            order[destination].source = SIZE_MAX;
+            if (source == start) {
+                ctx->index_ticks[destination] = saved_ticks;
+                ctx->index_key[destination] = saved_key;
+                ctx->index_duration[destination] = saved_duration;
+                ctx->index_dts[destination] = saved_dts;
+                ctx->index_pos[destination] = saved_pos;
+                ctx->index_packet_size[destination] = saved_packet_size;
+                break;
+            }
+            ctx->index_ticks[destination] = ctx->index_ticks[source];
+            ctx->index_key[destination] = ctx->index_key[source];
+            ctx->index_duration[destination] = ctx->index_duration[source];
+            ctx->index_dts[destination] = ctx->index_dts[source];
+            ctx->index_pos[destination] = ctx->index_pos[source];
+            ctx->index_packet_size[destination] = ctx->index_packet_size[source];
+            destination = source;
+        }
+    }
+    free(order);
+    return 0;
 }
 
 static int vp_index_scan_finish(VPContext *ctx) {
-    vp_index_sort_presentation_order(ctx);
+    if (vp_index_sort_presentation_order(ctx) < 0) {
+        ctx->index_scan_error = 1;
+        ctx->index_scan_active = 0;
+        return VP_ERR;
+    }
     if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) {
         ctx->index_scan_error = 1;
         ctx->index_scan_active = 0;
@@ -446,6 +490,7 @@ int vp_index_scan_begin(VPContext *ctx) {
     ctx->index_count = 0;
     ctx->index_seek_anchors = 0;
     ctx->index_scan_packets = 0;
+    ctx->index_scan_bytes = 0;
     ctx->index_scan_started = 1;
     ctx->index_scan_active = 1;
     ctx->index_scan_complete = 0;
@@ -473,6 +518,11 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
         }
         processed++;
         ctx->index_scan_packets++;
+        int64_t packet_end = ctx->pkt->pos >= 0 && ctx->pkt->size > 0
+            ? ctx->pkt->pos + ctx->pkt->size
+            : (ctx->io ? ctx->io->pos : 0);
+        if (packet_end > ctx->index_scan_bytes) ctx->index_scan_bytes = packet_end;
+        if (ctx->io && ctx->io->pos > ctx->index_scan_bytes) ctx->index_scan_bytes = ctx->io->pos;
         if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
             int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
             // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
@@ -504,6 +554,7 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
 int vp_index_scan_complete(VPContext *ctx) { return ctx && ctx->index_scan_complete; }
 int vp_index_scan_failed(VPContext *ctx) { return ctx && ctx->index_scan_error; }
 int vp_index_scan_packets(VPContext *ctx) { return ctx ? ctx->index_scan_packets : 0; }
+int64_t vp_index_scan_bytes(VPContext *ctx) { return ctx ? ctx->index_scan_bytes : 0; }
 
 int vp_index_build(VPContext *ctx) {
     if (vp_index_scan_begin(ctx) < 0) return VP_ERR;

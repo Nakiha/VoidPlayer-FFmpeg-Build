@@ -21,20 +21,25 @@ try {
   const create = (await import(pathToFileURL(glue))).default;
   core = await create({ wasmBinary: readFileSync(glue.replace(/\.js$/, '.wasm')) });
   call('vp_set_threads', ['number'], [2], null);
-  core.FS.writeFile('/sample.ts', readFileSync(file));
+  const sampleBytes = readFileSync(file);
+  core.FS.writeFile('/sample.ts', sampleBytes);
   ctx = call('vp_create');
   assert.equal(call('vp_open', ['number', 'string'], [ctx, '/sample.ts']), 0);
   assert.equal(call('vp_index_scan_begin', ['number'], [ctx]), 1);
   assert.equal(call('vp_index_scan_complete', ['number'], [ctx]), 0);
   assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must stay private');
 
-  let steps = 0, previousPackets = 0;
+  let steps = 0, previousPackets = 0, previousBytes = 0;
   while (!call('vp_index_scan_complete', ['number'], [ctx])) {
     const read = call('vp_index_scan_step', ['number', 'number'], [ctx, 17]);
     assert.ok(read >= 0 && read <= 17, `step read ${read} packets with a budget of 17`);
     const packets = call('vp_index_scan_packets', ['number'], [ctx]);
     assert.equal(packets, previousPackets + read, 'packet progress must be monotonic and exact');
     previousPackets = packets;
+    const scannedBytes = Number(call('vp_index_scan_bytes', ['number'], [ctx], 'i64'));
+    assert.ok(scannedBytes >= previousBytes, 'scan byte progress must be monotonic');
+    assert.ok(scannedBytes <= sampleBytes.length, 'scan byte progress must stay within the media');
+    previousBytes = scannedBytes;
     assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must not escape through the public API');
     assert.ok(++steps < 10000, 'scan should terminate');
   }
