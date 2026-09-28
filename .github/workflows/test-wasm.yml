@@ -37,18 +37,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build ffmpeg
 
+      - name: Build WASM core variants
+        run: |
+          chmod +x scripts/build-wasm.sh
+          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --clean --skip-package
+          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --mt --skip-package
+
       - name: Create MPEG-TS regression sample
         run: |
           mkdir -p .build
           ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x90:rate=24" \
             -frames:v 48 -an -c:v mpeg2video -g 12 -bf 2 -pix_fmt yuv420p \
             -f mpegts .build/seek-regression.ts
-
-      - name: Build WASM core variants
-        run: |
-          chmod +x scripts/build-wasm.sh
-          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --clean --skip-package
-          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --mt --skip-package
 
       - name: Test import, seek anchors, and random-seek pixels
         run: |
