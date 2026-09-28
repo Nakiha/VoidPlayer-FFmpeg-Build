@@ -49,7 +49,8 @@ try {
     assert.ok(scannedBytes >= previousBytes, 'scan byte progress must be monotonic');
     assert.ok(scannedBytes <= sampleBytes.length, 'scan byte progress must stay within the media');
     previousBytes = scannedBytes;
-    assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must not escape through the public API');
+    const visibleCount = call('vp_index_count', ['number'], [ctx]);
+    assert.equal(visibleCount, 0, `partial index must stay private (read=${read}, packets=${packets}, complete=${call('vp_index_scan_complete', ['number'], [ctx])}, failed=${call('vp_index_scan_failed', ['number'], [ctx])}, visibleCount=${visibleCount})`);
     assert.ok(++steps < 10000, 'scan should terminate');
   }
   assert.equal(call('vp_index_scan_failed', ['number'], [ctx]), 0);
