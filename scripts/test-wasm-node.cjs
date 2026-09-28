@@ -58,6 +58,7 @@ async function main() {
     // Round-trip the complete v2 index through a fresh decoder context and
     // compare an interior random-access frame, including MPEG-TS seek anchors.
     const anchorCount = core.ccall('vp_index_seek_anchors', 'number', ['number'], [ctx]);
+    if (/\.(?:ts|m2ts)$/i.test(name) && anchorCount <= 0) throw new Error(`${name}: MPEG-TS index has no demux seek anchors`);
     const indexBytes = core.ccall('vp_index_export_bytes', 'number', ['number'], [ctx]);
     if (indexBytes !== count * 40) throw new Error(`${name}: wrong index byte length ${indexBytes}`);
     const indexBuffer = core._malloc(indexBytes);
