@@ -871,6 +871,24 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
     }
 }
 
+// Decode and retain the first displayable frame without building a packet index.
+// The decoder is already primed by vp_open_decoders(); this advances from the
+// start and skips negative-time preroll, matching the browser timeline origin.
+int vp_prime_first_presentable(VPContext *ctx) {
+    if (!ctx || !ctx->dec) return VP_ERR;
+    if (ctx->have_frame) return VP_OK;
+    for (;;) {
+        int ret = vp_decode_one(ctx);
+        if (ret != VP_OK) return ret;
+        int64_t ticks = ctx->frame->best_effort_timestamp;
+        if (ticks == AV_NOPTS_VALUE || ticks < 0) continue;
+        if (vp_convert(ctx) < 0) return VP_ERR;
+        ctx->last_ticks = ticks;
+        ctx->have_frame = 1;
+        return VP_OK;
+    }
+}
+
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
 uint8_t *vp_pixels(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->pixels : NULL; }
 const VPFrameInfo *vp_frame_info(VPContext *ctx) { return ctx && ctx->have_frame ? &ctx->output : NULL; }
