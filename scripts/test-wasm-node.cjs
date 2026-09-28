@@ -34,7 +34,11 @@ async function main() {
   const indexAbi = core.ccall('vp_index_abi_version', 'number', [], []);
   const indexRecordBytes = core.ccall('vp_index_record_bytes', 'number', [], []);
   if (indexAbi !== 2 || indexRecordBytes !== 40) throw new Error('unexpected index ABI v2: ' + indexAbi + '/' + indexRecordBytes);
-  if (typeof core._vp_index_export !== 'function' || typeof core._vp_index_import !== 'function' || typeof core._vp_core_build_id !== 'function') throw new Error('index ABI v2 exports are missing');
+  if (typeof core._vp_index_export !== 'function' || typeof core._vp_index_import !== 'function' || typeof core._vp_core_build_id !== 'function' ||
+      typeof core._vp_index_scan_begin !== 'function' || typeof core._vp_index_scan_step !== 'function' ||
+      typeof core._vp_index_scan_complete !== 'function' || typeof core._vp_index_scan_packets !== 'function') {
+    throw new Error('index ABI v2 or incremental scan exports are missing');
+  }
 
   // Garbage input must fail cleanly, not crash.
   core.FS.writeFile('/garbage.bin', new Uint8Array([1, 2, 3, 4]));

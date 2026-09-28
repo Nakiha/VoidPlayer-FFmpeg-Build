@@ -86,6 +86,11 @@ typedef struct VPContext {
     int64_t *index_pos;
     int *index_packet_size;
     int index_seek_anchors;
+    int index_scan_started;
+    int index_scan_active;
+    int index_scan_complete;
+    int index_scan_error;
+    int index_scan_packets;
     int extract_frames, extract_restarts;
     size_t index_count;
     size_t index_capacity;
@@ -212,6 +217,11 @@ void vp_close_input(VPContext *ctx) {
     ctx->stream_idx = -1;
     ctx->index_count = 0;
     ctx->index_seek_anchors = 0;
+    ctx->index_scan_started = 0;
+    ctx->index_scan_active = 0;
+    ctx->index_scan_complete = 0;
+    ctx->index_scan_error = 0;
+    ctx->index_scan_packets = 0;
     ctx->extract_frames = ctx->extract_restarts = 0;
     vp_reset_decoder_state(ctx);
 }
@@ -385,35 +395,8 @@ static int vp_decode_one(VPContext *ctx) {
     return VP_EOF;
 }
 
-int vp_index_build(VPContext *ctx) {
-    if (!ctx || !ctx->dec) return VP_ERR;
-    // Demux-only pass: packet pts/duration/key flags are enough for the index
-    // and avoid decoding the entire stream at load time (expensive for VVC).
-    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-    ctx->index_count = 0;
-    ctx->index_seek_anchors = 0;
-    while (av_read_frame(ctx->fmt, ctx->pkt) >= 0) {
-        if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
-            int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
-            // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
-            // own their index semantics (e.g. Matroska positions name clusters,
-            // not packets), so never overwrite their entries with packet offsets.
-            if (!strcmp(ctx->fmt->iformat->name, "mpegts") && key &&
-                    ctx->pkt->pos >= 0 && ctx->pkt->dts != AV_NOPTS_VALUE) {
-                if (av_add_index_entry(ctx->fmt->streams[ctx->stream_idx], ctx->pkt->pos,
-                        ctx->pkt->dts, ctx->pkt->size, 0, AVINDEX_KEYFRAME) < 0) {
-                    av_packet_unref(ctx->pkt); return VP_ERR;
-                }
-                ctx->index_seek_anchors++;
-            }
-            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts, ctx->pkt->pos, ctx->pkt->size) < 0) {
-                av_packet_unref(ctx->pkt);
-                return VP_ERR;
-            }
-        }
-        av_packet_unref(ctx->pkt);
-    }
-    // Sort into presentation order, keeping key/duration paired with ticks.
+static void vp_index_sort_presentation_order(VPContext *ctx) {
+    // Sort into presentation order while keeping all record fields paired.
     for (size_t i = 1; i < ctx->index_count; i++) {
         int64_t ticks = ctx->index_ticks[i];
         int key = ctx->index_key[i];
@@ -438,24 +421,110 @@ int vp_index_build(VPContext *ctx) {
         ctx->index_pos[j] = pos;
         ctx->index_packet_size[j] = packet_size;
     }
-    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(ctx->dec);
-    vp_reset_decoder_state(ctx);
-    return (int)ctx->index_count;
 }
 
-int vp_index_count(VPContext *ctx) { return ctx ? (int)ctx->index_count : 0; }
-int vp_index_seek_anchors(VPContext *ctx) { return ctx ? ctx->index_seek_anchors : 0; }
+static int vp_index_scan_finish(VPContext *ctx) {
+    vp_index_sort_presentation_order(ctx);
+    if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+        ctx->index_scan_error = 1;
+        ctx->index_scan_active = 0;
+        return VP_ERR;
+    }
+    avcodec_flush_buffers(ctx->dec);
+    vp_reset_decoder_state(ctx);
+    ctx->index_scan_active = 0;
+    ctx->index_scan_complete = 1;
+    return VP_OK;
+}
+
+// Begin a demux-only scan. packet_budget passed to step limits all demux
+// packets read, including packets outside the selected video stream.
+int vp_index_scan_begin(VPContext *ctx) {
+    if (!ctx || !ctx->fmt || !ctx->dec || ctx->stream_idx < 0 ||
+        ctx->index_scan_started || ctx->index_count != 0) return VP_ERR;
+    if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) return VP_ERR;
+    ctx->index_count = 0;
+    ctx->index_seek_anchors = 0;
+    ctx->index_scan_packets = 0;
+    ctx->index_scan_started = 1;
+    ctx->index_scan_active = 1;
+    ctx->index_scan_complete = 0;
+    ctx->index_scan_error = 0;
+    return VP_OK;
+}
+
+// Read at most packet_budget demux packets. A non-negative return is the
+// number read in this step; vp_index_scan_complete() reports EOF separately.
+// Partial records remain private until the final presentation-order sort ends.
+int vp_index_scan_step(VPContext *ctx, int packet_budget) {
+    if (!ctx || !ctx->index_scan_active || packet_budget <= 0) return VP_ERR;
+    int processed = 0;
+    while (processed < packet_budget) {
+        int ret = av_read_frame(ctx->fmt, ctx->pkt);
+        if (ret == AVERROR_EOF) {
+            if (vp_index_scan_finish(ctx) < 0) return VP_ERR;
+            return processed;
+        }
+        if (ret < 0) {
+            av_packet_unref(ctx->pkt);
+            ctx->index_scan_error = 1;
+            ctx->index_scan_active = 0;
+            return VP_ERR;
+        }
+        processed++;
+        ctx->index_scan_packets++;
+        if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
+            int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
+            // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
+            // own their index semantics (e.g. Matroska positions name clusters,
+            // not packets), so never overwrite their entries with packet offsets.
+            if (!strcmp(ctx->fmt->iformat->name, "mpegts") && key &&
+                    ctx->pkt->pos >= 0 && ctx->pkt->dts != AV_NOPTS_VALUE) {
+                if (av_add_index_entry(ctx->fmt->streams[ctx->stream_idx], ctx->pkt->pos,
+                        ctx->pkt->dts, ctx->pkt->size, 0, AVINDEX_KEYFRAME) < 0) {
+                    av_packet_unref(ctx->pkt);
+                    ctx->index_scan_error = 1;
+                    ctx->index_scan_active = 0;
+                    return VP_ERR;
+                }
+                ctx->index_seek_anchors++;
+            }
+            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts, ctx->pkt->pos, ctx->pkt->size) < 0) {
+                av_packet_unref(ctx->pkt);
+                ctx->index_scan_error = 1;
+                ctx->index_scan_active = 0;
+                return VP_ERR;
+            }
+        }
+        av_packet_unref(ctx->pkt);
+    }
+    return processed;
+}
+
+int vp_index_scan_complete(VPContext *ctx) { return ctx && ctx->index_scan_complete; }
+int vp_index_scan_failed(VPContext *ctx) { return ctx && ctx->index_scan_error; }
+int vp_index_scan_packets(VPContext *ctx) { return ctx ? ctx->index_scan_packets : 0; }
+
+int vp_index_build(VPContext *ctx) {
+    if (vp_index_scan_begin(ctx) < 0) return VP_ERR;
+    while (!ctx->index_scan_complete && !ctx->index_scan_error) {
+        if (vp_index_scan_step(ctx, 4096) < 0) return VP_ERR;
+    }
+    return ctx->index_scan_complete ? (int)ctx->index_count : VP_ERR;
+}
+
+int vp_index_count(VPContext *ctx) { return ctx && ctx->index_scan_complete ? (int)ctx->index_count : 0; }
+int vp_index_seek_anchors(VPContext *ctx) { return ctx && ctx->index_scan_complete ? ctx->index_seek_anchors : 0; }
 int vp_extract_frames(VPContext *ctx) { return ctx ? ctx->extract_frames : 0; }
 int vp_extract_restarts(VPContext *ctx) { return ctx ? ctx->extract_restarts : 0; }
 int64_t vp_index_ticks(VPContext *ctx, int i) {
-    return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_ticks[i] : 0;
+    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_ticks[i] : 0;
 }
 int vp_index_is_key(VPContext *ctx, int i) {
-    return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_key[i] : 0;
+    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_key[i] : 0;
 }
 int64_t vp_index_duration(VPContext *ctx, int i) {
-    return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
+    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
 }
 
 #define VP_INDEX_FLAG_KEY 1u
@@ -471,7 +540,7 @@ int vp_stream_index(VPContext *ctx) { return ctx && ctx->stream_idx >= 0 ? ctx->
 int vp_index_abi_version(void) { return 2; }
 int vp_index_record_bytes(void) { return (int)sizeof(VPIndexRecordV2); }
 int vp_index_export_bytes(VPContext *ctx) {
-    if (!ctx || ctx->index_count > (size_t)(INT_MAX / (int)sizeof(VPIndexRecordV2))) return VP_ERR;
+    if (!ctx || !ctx->index_scan_complete || ctx->index_count > (size_t)(INT_MAX / (int)sizeof(VPIndexRecordV2))) return VP_ERR;
     return (int)(ctx->index_count * sizeof(VPIndexRecordV2));
 }
 
@@ -505,7 +574,7 @@ int vp_index_export(VPContext *ctx, void *output, int capacity_bytes) {
 int vp_index_import(VPContext *ctx, const void *input, int count) {
     if (!ctx || !ctx->dec || !ctx->fmt || ctx->stream_idx < 0 || !input || count <= 0 ||
         count > INT_MAX / (int)sizeof(VPIndexRecordV2) || ctx->index_count != 0 ||
-        ctx->index_seek_anchors != 0) return VP_ERR;
+        ctx->index_seek_anchors != 0 || ctx->index_scan_started) return VP_ERR;
 
     size_t n = (size_t)count;
     int64_t *ticks = malloc(n * sizeof(*ticks));
@@ -565,6 +634,7 @@ int vp_index_import(VPContext *ctx, const void *input, int count) {
     ctx->index_ticks = ticks; ctx->index_key = keys; ctx->index_duration = durations;
     ctx->index_dts = decode_times; ctx->index_pos = positions; ctx->index_packet_size = sizes;
     ctx->index_count = n; ctx->index_capacity = n; ctx->index_seek_anchors = anchors;
+    ctx->index_scan_started = 1; ctx->index_scan_active = 0; ctx->index_scan_complete = 1; ctx->index_scan_error = 0;
 
     av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(ctx->dec);

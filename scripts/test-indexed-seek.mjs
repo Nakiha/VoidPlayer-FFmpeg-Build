@@ -24,7 +24,23 @@ try {
   core.FS.writeFile('/sample.ts', readFileSync(file));
   ctx = call('vp_create');
   assert.equal(call('vp_open', ['number', 'string'], [ctx, '/sample.ts']), 0);
-  const count = call('vp_index_build', ['number'], [ctx]);
+  assert.equal(call('vp_index_scan_begin', ['number'], [ctx]), 1);
+  assert.equal(call('vp_index_scan_complete', ['number'], [ctx]), 0);
+  assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must stay private');
+
+  let steps = 0, previousPackets = 0;
+  while (!call('vp_index_scan_complete', ['number'], [ctx])) {
+    const read = call('vp_index_scan_step', ['number', 'number'], [ctx, 17]);
+    assert.ok(read >= 0 && read <= 17, `step read ${read} packets with a budget of 17`);
+    const packets = call('vp_index_scan_packets', ['number'], [ctx]);
+    assert.equal(packets, previousPackets + read, 'packet progress must be monotonic and exact');
+    previousPackets = packets;
+    assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must not escape through the public API');
+    assert.ok(++steps < 10000, 'scan should terminate');
+  }
+  assert.equal(call('vp_index_scan_failed', ['number'], [ctx]), 0);
+  assert.ok(steps > 1, 'the test must exercise multiple scan steps');
+  const count = call('vp_index_count', ['number'], [ctx]);
   assert.equal(count, 1750);
   assert.ok(call('vp_index_seek_anchors', ['number'], [ctx]) >= 140);
   const targets = [1600, 250, 900, 1749, 0, 11, 12, 13, 23, 24, 25, 250];
