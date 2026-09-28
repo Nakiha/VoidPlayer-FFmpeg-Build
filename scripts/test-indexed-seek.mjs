@@ -25,6 +25,15 @@ try {
   core.FS.writeFile('/sample.ts', sampleBytes);
   ctx = call('vp_create');
   assert.equal(call('vp_open', ['number', 'string'], [ctx, '/sample.ts']), 0);
+  assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'first presentation must not require an index');
+  assert.equal(call('vp_prime_first_presentable', ['number'], [ctx]), 1, 'first presentable frame must decode before indexing');
+  const primedTicks = call('vp_last_ticks', ['number'], [ctx], 'i64');
+  assert.ok(BigInt(primedTicks) >= 0n, 'the first presentable frame must skip negative preroll');
+  const primedDescriptor = call('vp_frame_info', ['number'], [ctx]);
+  const primedView = new DataView(core.HEAPU8.buffer, primedDescriptor, 160);
+  assert.equal(primedView.getBigInt64(0, true), BigInt(primedTicks));
+  const primedPixels = call('vp_pixels', ['number'], [ctx]);
+  const primedHash = createHash('sha256').update(core.HEAPU8.subarray(primedPixels, primedPixels + primedView.getInt32(36, true))).digest('hex');
   assert.equal(call('vp_index_scan_begin', ['number'], [ctx]), 1);
   assert.equal(call('vp_index_scan_complete', ['number'], [ctx]), 0);
   assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'partial index must stay private');
@@ -47,6 +56,7 @@ try {
   assert.ok(steps > 1, 'the test must exercise multiple scan steps');
   const count = call('vp_index_count', ['number'], [ctx]);
   assert.equal(count, 1750);
+  assert.equal(ticks(0), BigInt(primedTicks), 'the stable origin is the first displayable indexed frame');
   assert.ok(call('vp_index_seek_anchors', ['number'], [ctx]) >= 140);
   const targets = [1600, 250, 900, 1749, 0, 11, 12, 13, 23, 24, 25, 250];
   const oracle = new Map();
@@ -62,6 +72,7 @@ try {
     return createHash('sha256').update(core.HEAPU8.subarray(pixels, pixels + view.getInt32(36, true))).digest('hex');
   }
   for (let i = 0; i < count; i++) { const hash = extract(i); if (targets.includes(i)) oracle.set(i, hash); }
+  assert.equal(primedHash, oracle.get(0), 'the pre-index first frame must equal the full-index oracle');
   for (const i of targets) {
     const started = performance.now(), hash = extract(i);
     const decoded = call('vp_extract_frames', ['number'], [ctx]);
