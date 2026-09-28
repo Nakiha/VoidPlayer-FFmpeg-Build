@@ -85,6 +85,15 @@ typedef struct VPContext {
     int64_t *index_dts;
     int64_t *index_pos;
     int *index_packet_size;
+    uint64_t *index_order;
+    uint64_t index_next_order;
+    size_t index_stable_count;
+    int index_scan_progressive;
+    int64_t index_scan_last_output_ticks;
+    int index_import_streaming;
+    int index_import_has_safe_ticks;
+    int index_import_next_seq;
+    int64_t index_import_safe_ticks;
     int index_seek_anchors;
     int index_scan_started;
     int index_scan_active;
@@ -199,6 +208,7 @@ void vp_destroy(VPContext *ctx) {
     free(ctx->index_dts);
     free(ctx->index_pos);
     free(ctx->index_packet_size);
+    free(ctx->index_order);
     free(ctx->pixels);
     free(ctx);
 }
@@ -217,6 +227,14 @@ void vp_close_input(VPContext *ctx) {
     ctx->io = NULL;
     ctx->stream_idx = -1;
     ctx->index_count = 0;
+    ctx->index_stable_count = 0;
+    ctx->index_next_order = 0;
+    ctx->index_scan_progressive = 0;
+    ctx->index_scan_last_output_ticks = INT64_MIN;
+    ctx->index_import_streaming = 0;
+    ctx->index_import_has_safe_ticks = 0;
+    ctx->index_import_next_seq = 0;
+    ctx->index_import_safe_ticks = INT64_MIN;
     ctx->index_seek_anchors = 0;
     ctx->index_scan_started = 0;
     ctx->index_scan_active = 0;
@@ -333,38 +351,52 @@ int vp_color_transfer(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_t
 int vp_color_space(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->colorspace, ctx->dec ? ctx->dec->colorspace : 2, AVCOL_SPC_UNSPECIFIED) : 2; }
 int vp_color_range(VPContext *ctx) { return ctx ? vp_pick(ctx->frame->color_range, ctx->dec ? ctx->dec->color_range : 0, AVCOL_RANGE_UNSPECIFIED) : 0; }
 
+static int vp_index_reserve(VPContext *ctx, size_t needed) {
+    if (needed <= ctx->index_capacity) return 0;
+    if (needed > (size_t)(INT_MAX / (int)sizeof(int64_t)) ||
+        needed > SIZE_MAX / sizeof(uint64_t)) return VP_ERR;
+    size_t capacity = ctx->index_capacity ? ctx->index_capacity : 1024;
+    while (capacity < needed) {
+        if (capacity > SIZE_MAX / 2) return VP_ERR;
+        capacity *= 2;
+    }
+    if (capacity > (size_t)(INT_MAX / (int)sizeof(int64_t))) capacity = needed;
+    int64_t *ticks = realloc(ctx->index_ticks, capacity * sizeof(*ticks));
+    if (!ticks) return VP_ERR;
+    ctx->index_ticks = ticks;
+    int *keys = realloc(ctx->index_key, capacity * sizeof(*keys));
+    if (!keys) return VP_ERR;
+    ctx->index_key = keys;
+    int64_t *durations = realloc(ctx->index_duration, capacity * sizeof(*durations));
+    if (!durations) return VP_ERR;
+    ctx->index_duration = durations;
+    int64_t *decode_times = realloc(ctx->index_dts, capacity * sizeof(*decode_times));
+    if (!decode_times) return VP_ERR;
+    ctx->index_dts = decode_times;
+    int64_t *positions = realloc(ctx->index_pos, capacity * sizeof(*positions));
+    if (!positions) return VP_ERR;
+    ctx->index_pos = positions;
+    int *sizes = realloc(ctx->index_packet_size, capacity * sizeof(*sizes));
+    if (!sizes) return VP_ERR;
+    ctx->index_packet_size = sizes;
+    uint64_t *orders = realloc(ctx->index_order, capacity * sizeof(*orders));
+    if (!orders) return VP_ERR;
+    ctx->index_order = orders;
+    ctx->index_capacity = capacity;
+    return 0;
+}
+
 static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duration,
                          int64_t dts, int64_t pos, int packet_size) {
-    if (ctx->index_count == ctx->index_capacity) {
-        size_t capacity = ctx->index_capacity ? ctx->index_capacity * 2 : 1024;
-        if (capacity < ctx->index_capacity || capacity > (size_t)(INT_MAX / (int)sizeof(int64_t))) return VP_ERR;
-        int64_t *ticks_array = realloc(ctx->index_ticks, capacity * sizeof(*ticks_array));
-        if (!ticks_array) return VP_ERR;
-        ctx->index_ticks = ticks_array;
-        int *keys = realloc(ctx->index_key, capacity * sizeof(*keys));
-        if (!keys) return VP_ERR;
-        ctx->index_key = keys;
-        int64_t *durations = realloc(ctx->index_duration, capacity * sizeof(*durations));
-        if (!durations) return VP_ERR;
-        ctx->index_duration = durations;
-        int64_t *decode_times = realloc(ctx->index_dts, capacity * sizeof(*decode_times));
-        if (!decode_times) return VP_ERR;
-        ctx->index_dts = decode_times;
-        int64_t *positions = realloc(ctx->index_pos, capacity * sizeof(*positions));
-        if (!positions) return VP_ERR;
-        ctx->index_pos = positions;
-        int *sizes = realloc(ctx->index_packet_size, capacity * sizeof(*sizes));
-        if (!sizes) return VP_ERR;
-        ctx->index_packet_size = sizes;
-        ctx->index_capacity = capacity;
-    }
-    ctx->index_ticks[ctx->index_count] = ticks;
-    ctx->index_key[ctx->index_count] = key;
-    ctx->index_duration[ctx->index_count] = duration;
-    ctx->index_dts[ctx->index_count] = dts;
-    ctx->index_pos[ctx->index_count] = pos;
-    ctx->index_packet_size[ctx->index_count] = packet_size;
-    ctx->index_count++;
+    if (ctx->index_count == SIZE_MAX || vp_index_reserve(ctx, ctx->index_count + 1) < 0) return VP_ERR;
+    size_t i = ctx->index_count++;
+    ctx->index_ticks[i] = ticks;
+    ctx->index_key[i] = key;
+    ctx->index_duration[i] = duration;
+    ctx->index_dts[i] = dts;
+    ctx->index_pos[i] = pos;
+    ctx->index_packet_size[i] = packet_size;
+    ctx->index_order[i] = ctx->index_next_order++;
     return 0;
 }
 
@@ -399,6 +431,7 @@ static int vp_decode_one(VPContext *ctx) {
 
 typedef struct VPIndexSortKey {
     int64_t ticks;
+    uint64_t order;
     size_t source;
 } VPIndexSortKey;
 
@@ -407,55 +440,58 @@ static int vp_index_sort_key_compare(const void *left, const void *right) {
     const VPIndexSortKey *b = (const VPIndexSortKey *)right;
     if (a->ticks < b->ticks) return -1;
     if (a->ticks > b->ticks) return 1;
-    // Original packet order is the stable tie-break for duplicate PTS values.
-    return a->source < b->source ? -1 : a->source > b->source ? 1 : 0;
+    return a->order < b->order ? -1 : a->order > b->order ? 1 : 0;
 }
 
-static int vp_index_sort_presentation_order(VPContext *ctx) {
-    size_t count = ctx->index_count;
+static int vp_index_sort_range(VPContext *ctx, size_t first, size_t count) {
     if (count < 2) return 0;
     if (count > SIZE_MAX / sizeof(VPIndexSortKey)) return VP_ERR;
     VPIndexSortKey *order = malloc(count * sizeof(*order));
     if (!order) return VP_ERR;
     for (size_t i = 0; i < count; i++) {
-        order[i].ticks = ctx->index_ticks[i];
+        order[i].ticks = ctx->index_ticks[first + i];
+        order[i].order = ctx->index_order[first + i];
         order[i].source = i;
     }
     qsort(order, count, sizeof(*order), vp_index_sort_key_compare);
 
-    // Apply the stable permutation in-place so peak memory stays bounded to
-    // one (PTS, source-index) key per record instead of duplicating all arrays.
+    // Apply the permutation in place, retaining original packet order for ties.
     for (size_t start = 0; start < count; start++) {
         if (order[start].source == SIZE_MAX) continue;
         if (order[start].source == start) {
             order[start].source = SIZE_MAX;
             continue;
         }
-        int64_t saved_ticks = ctx->index_ticks[start];
-        int saved_key = ctx->index_key[start];
-        int64_t saved_duration = ctx->index_duration[start];
-        int64_t saved_dts = ctx->index_dts[start];
-        int64_t saved_pos = ctx->index_pos[start];
-        int saved_packet_size = ctx->index_packet_size[start];
+        int64_t saved_ticks = ctx->index_ticks[first + start];
+        int saved_key = ctx->index_key[first + start];
+        int64_t saved_duration = ctx->index_duration[first + start];
+        int64_t saved_dts = ctx->index_dts[first + start];
+        int64_t saved_pos = ctx->index_pos[first + start];
+        int saved_packet_size = ctx->index_packet_size[first + start];
+        uint64_t saved_order = ctx->index_order[first + start];
         size_t destination = start;
         for (;;) {
             size_t source = order[destination].source;
             order[destination].source = SIZE_MAX;
+            size_t dst = first + destination;
             if (source == start) {
-                ctx->index_ticks[destination] = saved_ticks;
-                ctx->index_key[destination] = saved_key;
-                ctx->index_duration[destination] = saved_duration;
-                ctx->index_dts[destination] = saved_dts;
-                ctx->index_pos[destination] = saved_pos;
-                ctx->index_packet_size[destination] = saved_packet_size;
+                ctx->index_ticks[dst] = saved_ticks;
+                ctx->index_key[dst] = saved_key;
+                ctx->index_duration[dst] = saved_duration;
+                ctx->index_dts[dst] = saved_dts;
+                ctx->index_pos[dst] = saved_pos;
+                ctx->index_packet_size[dst] = saved_packet_size;
+                ctx->index_order[dst] = saved_order;
                 break;
             }
-            ctx->index_ticks[destination] = ctx->index_ticks[source];
-            ctx->index_key[destination] = ctx->index_key[source];
-            ctx->index_duration[destination] = ctx->index_duration[source];
-            ctx->index_dts[destination] = ctx->index_dts[source];
-            ctx->index_pos[destination] = ctx->index_pos[source];
-            ctx->index_packet_size[destination] = ctx->index_packet_size[source];
+            size_t src = first + source;
+            ctx->index_ticks[dst] = ctx->index_ticks[src];
+            ctx->index_key[dst] = ctx->index_key[src];
+            ctx->index_duration[dst] = ctx->index_duration[src];
+            ctx->index_dts[dst] = ctx->index_dts[src];
+            ctx->index_pos[dst] = ctx->index_pos[src];
+            ctx->index_packet_size[dst] = ctx->index_packet_size[src];
+            ctx->index_order[dst] = ctx->index_order[src];
             destination = source;
         }
     }
@@ -463,7 +499,82 @@ static int vp_index_sort_presentation_order(VPContext *ctx) {
     return 0;
 }
 
+static int vp_index_sort_presentation_order(VPContext *ctx) {
+    return vp_index_sort_range(ctx, 0, ctx->index_count);
+}
+
+static void vp_index_swap_records(VPContext *ctx, size_t a, size_t b) {
+    if (a == b) return;
+#define VP_SWAP_FIELD(field, type) do { type value = ctx->field[a]; ctx->field[a] = ctx->field[b]; ctx->field[b] = value; } while (0)
+    VP_SWAP_FIELD(index_ticks, int64_t);
+    VP_SWAP_FIELD(index_key, int);
+    VP_SWAP_FIELD(index_duration, int64_t);
+    VP_SWAP_FIELD(index_dts, int64_t);
+    VP_SWAP_FIELD(index_pos, int64_t);
+    VP_SWAP_FIELD(index_packet_size, int);
+    VP_SWAP_FIELD(index_order, uint64_t);
+#undef VP_SWAP_FIELD
+}
+
+static int vp_index_publish_through(VPContext *ctx, int64_t ticks) {
+    size_t first = ctx->index_stable_count;
+    size_t write = first;
+    for (size_t i = first; i < ctx->index_count; i++) {
+        if (ctx->index_ticks[i] <= ticks) {
+            vp_index_swap_records(ctx, write, i);
+            write++;
+        }
+    }
+    if (write > first && vp_index_sort_range(ctx, first, write - first) < 0) return VP_ERR;
+    ctx->index_stable_count = write;
+    return VP_OK;
+}
+
+static void vp_index_disable_progressive(VPContext *ctx) {
+    ctx->index_scan_progressive = 0;
+}
+
+static int vp_index_scan_drain(VPContext *ctx) {
+    for (;;) {
+        av_frame_unref(ctx->frame);
+        int ret = avcodec_receive_frame(ctx->dec, ctx->frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) return VP_OK;
+        if (ret < 0) { vp_index_disable_progressive(ctx); return VP_OK; }
+        int64_t pts = ctx->frame->best_effort_timestamp;
+        if (pts == AV_NOPTS_VALUE || (ctx->index_scan_last_output_ticks != INT64_MIN &&
+                                     pts < ctx->index_scan_last_output_ticks)) {
+            vp_index_disable_progressive(ctx);
+            return VP_OK;
+        }
+        ctx->index_scan_last_output_ticks = pts;
+        if (vp_index_publish_through(ctx, pts) < 0) vp_index_disable_progressive(ctx);
+    }
+}
+
+static void vp_index_scan_decode_packet(VPContext *ctx) {
+    if (!ctx->index_scan_progressive) return;
+    int ret = avcodec_send_packet(ctx->dec, ctx->pkt);
+    if (ret == AVERROR(EAGAIN)) {
+        vp_index_scan_drain(ctx);
+        if (!ctx->index_scan_progressive) return;
+        ret = avcodec_send_packet(ctx->dec, ctx->pkt);
+    }
+    if (ret < 0) { vp_index_disable_progressive(ctx); return; }
+    vp_index_scan_drain(ctx);
+}
+
+static void vp_index_scan_flush_decoder(VPContext *ctx) {
+    if (!ctx->index_scan_progressive) return;
+    int ret = avcodec_send_packet(ctx->dec, NULL);
+    if (ret == AVERROR(EAGAIN)) {
+        vp_index_scan_drain(ctx);
+        if (!ctx->index_scan_progressive) return;
+        ret = avcodec_send_packet(ctx->dec, NULL);
+    }
+    if (ret >= 0) vp_index_scan_drain(ctx);
+}
 static int vp_index_scan_finish(VPContext *ctx) {
+    vp_index_scan_flush_decoder(ctx);
     if (vp_index_sort_presentation_order(ctx) < 0) {
         ctx->index_scan_error = 1;
         ctx->index_scan_active = 0;
@@ -478,19 +589,29 @@ static int vp_index_scan_finish(VPContext *ctx) {
     vp_reset_decoder_state(ctx);
     ctx->index_scan_active = 0;
     ctx->index_scan_complete = 1;
+    if (ctx->index_scan_progressive) ctx->index_stable_count = ctx->index_count;
     return VP_OK;
 }
 
-// Begin a demux-only scan. packet_budget passed to step limits all demux
+// Begin a demux scan. MPEG-TS may publish only records at or before the last
+// timestamp retired by the decoder in presentation order. Other demuxers keep
+// the complete-index behavior until they provide their own stability proof. packet_budget passed to step limits all demux
 // packets read, including packets outside the selected video stream.
-int vp_index_scan_begin(VPContext *ctx) {
+static int vp_index_scan_begin_internal(VPContext *ctx, int progressive) {
     if (!ctx || !ctx->fmt || !ctx->dec || ctx->stream_idx < 0 ||
-        ctx->index_scan_started || ctx->index_count != 0) return VP_ERR;
+        ctx->index_scan_started || ctx->index_import_streaming || ctx->index_count != 0) return VP_ERR;
     if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) return VP_ERR;
     ctx->index_count = 0;
+    ctx->index_stable_count = 0;
+    ctx->index_next_order = 0;
+    ctx->index_scan_progressive = progressive && ctx->fmt->iformat &&
+        !strcmp(ctx->fmt->iformat->name, "mpegts");
+    ctx->index_scan_last_output_ticks = INT64_MIN;
     ctx->index_seek_anchors = 0;
     ctx->index_scan_packets = 0;
     ctx->index_scan_bytes = 0;
+    avcodec_flush_buffers(ctx->dec);
+    vp_reset_decoder_state(ctx);
     ctx->index_scan_started = 1;
     ctx->index_scan_active = 1;
     ctx->index_scan_complete = 0;
@@ -498,9 +619,17 @@ int vp_index_scan_begin(VPContext *ctx) {
     return VP_OK;
 }
 
+int vp_index_scan_begin(VPContext *ctx) {
+    return vp_index_scan_begin_internal(ctx, 0);
+}
+
+int vp_index_scan_stream_begin(VPContext *ctx) {
+    return vp_index_scan_begin_internal(ctx, 1);
+}
+
 // Read at most packet_budget demux packets. A non-negative return is the
 // number read in this step; vp_index_scan_complete() reports EOF separately.
-// Partial records remain private until the final presentation-order sort ends.
+// Only MPEG-TS can currently publish stable record ranges during the scan.
 int vp_index_scan_step(VPContext *ctx, int packet_budget) {
     if (!ctx || !ctx->index_scan_active || packet_budget <= 0) return VP_ERR;
     int processed = 0;
@@ -523,36 +652,55 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
             : (ctx->io ? ctx->io->pos : 0);
         if (packet_end > ctx->index_scan_bytes) ctx->index_scan_bytes = packet_end;
         if (ctx->io && ctx->io->pos > ctx->index_scan_bytes) ctx->index_scan_bytes = ctx->io->pos;
-        if (ctx->pkt->stream_index == ctx->stream_idx && ctx->pkt->pts != AV_NOPTS_VALUE) {
-            int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
-            // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
-            // own their index semantics (e.g. Matroska positions name clusters,
-            // not packets), so never overwrite their entries with packet offsets.
-            if (!strcmp(ctx->fmt->iformat->name, "mpegts") && key &&
-                    ctx->pkt->pos >= 0 && ctx->pkt->dts != AV_NOPTS_VALUE) {
-                if (av_add_index_entry(ctx->fmt->streams[ctx->stream_idx], ctx->pkt->pos,
-                        ctx->pkt->dts, ctx->pkt->size, 0, AVINDEX_KEYFRAME) < 0) {
+        if (ctx->pkt->stream_index == ctx->stream_idx) {
+            if (ctx->index_scan_progressive && ctx->pkt->pts != AV_NOPTS_VALUE &&
+                ctx->index_stable_count > 0 &&
+                ctx->pkt->pts < ctx->index_ticks[ctx->index_stable_count - 1]) {
+                // A backward timestamp/discontinuity invalidates the online
+                // ordering proof. Continue the legacy full scan, but stop
+                // publishing partial ranges so the server can reset clients.
+                vp_index_disable_progressive(ctx);
+            }
+            if (ctx->pkt->pts != AV_NOPTS_VALUE) {
+                int key = !!(ctx->pkt->flags & AV_PKT_FLAG_KEY);
+                // MPEG-TS uses libavformat's binary timestamp seek. Other demuxers
+                // own their index semantics (e.g. Matroska positions name clusters,
+                // not packets), so never overwrite their entries with packet offsets.
+                if (!strcmp(ctx->fmt->iformat->name, "mpegts") && key &&
+                        ctx->pkt->pos >= 0 && ctx->pkt->dts != AV_NOPTS_VALUE) {
+                    if (av_add_index_entry(ctx->fmt->streams[ctx->stream_idx], ctx->pkt->pos,
+                            ctx->pkt->dts, ctx->pkt->size, 0, AVINDEX_KEYFRAME) < 0) {
+                        av_packet_unref(ctx->pkt);
+                        ctx->index_scan_error = 1;
+                        ctx->index_scan_active = 0;
+                        return VP_ERR;
+                    }
+                    ctx->index_seek_anchors++;
+                }
+                if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts, ctx->pkt->pos, ctx->pkt->size) < 0) {
                     av_packet_unref(ctx->pkt);
                     ctx->index_scan_error = 1;
                     ctx->index_scan_active = 0;
                     return VP_ERR;
                 }
-                ctx->index_seek_anchors++;
             }
-            if (vp_index_push(ctx, ctx->pkt->pts, key, ctx->pkt->duration, ctx->pkt->dts, ctx->pkt->pos, ctx->pkt->size) < 0) {
-                av_packet_unref(ctx->pkt);
-                ctx->index_scan_error = 1;
-                ctx->index_scan_active = 0;
-                return VP_ERR;
-            }
+            vp_index_scan_decode_packet(ctx);
         }
         av_packet_unref(ctx->pkt);
     }
     return processed;
 }
-
 int vp_index_scan_complete(VPContext *ctx) { return ctx && ctx->index_scan_complete; }
 int vp_index_scan_failed(VPContext *ctx) { return ctx && ctx->index_scan_error; }
+int vp_index_scan_progressive_supported(VPContext *ctx) { return ctx && ctx->index_scan_progressive; }
+int vp_index_scan_stable_count(VPContext *ctx) {
+    if (!ctx || !ctx->index_scan_progressive) return -1;
+    return (int)ctx->index_stable_count;
+}
+int64_t vp_index_scan_stable_ticks(VPContext *ctx) {
+    if (!ctx || !ctx->index_scan_progressive || ctx->index_stable_count == 0) return -1;
+    return ctx->index_ticks[ctx->index_stable_count - 1];
+}
 int vp_index_scan_packets(VPContext *ctx) { return ctx ? ctx->index_scan_packets : 0; }
 int64_t vp_index_scan_bytes(VPContext *ctx) { return ctx ? ctx->index_scan_bytes : 0; }
 
@@ -564,18 +712,25 @@ int vp_index_build(VPContext *ctx) {
     return ctx->index_scan_complete ? (int)ctx->index_count : VP_ERR;
 }
 
-int vp_index_count(VPContext *ctx) { return ctx && ctx->index_scan_complete ? (int)ctx->index_count : 0; }
-int vp_index_seek_anchors(VPContext *ctx) { return ctx && ctx->index_scan_complete ? ctx->index_seek_anchors : 0; }
+int vp_index_count(VPContext *ctx) {
+    return ctx && (ctx->index_scan_complete || ctx->index_import_streaming) ? (int)ctx->index_count : 0;
+}
+int vp_index_seek_anchors(VPContext *ctx) {
+    return ctx && (ctx->index_scan_complete || ctx->index_import_streaming) ? ctx->index_seek_anchors : 0;
+}
 int vp_extract_frames(VPContext *ctx) { return ctx ? ctx->extract_frames : 0; }
 int vp_extract_restarts(VPContext *ctx) { return ctx ? ctx->extract_restarts : 0; }
 int64_t vp_index_ticks(VPContext *ctx, int i) {
-    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_ticks[i] : 0;
+    return ctx && (ctx->index_scan_complete || ctx->index_import_streaming) &&
+        i >= 0 && (size_t)i < ctx->index_count ? ctx->index_ticks[i] : 0;
 }
 int vp_index_is_key(VPContext *ctx, int i) {
-    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_key[i] : 0;
+    return ctx && (ctx->index_scan_complete || ctx->index_import_streaming) &&
+        i >= 0 && (size_t)i < ctx->index_count ? ctx->index_key[i] : 0;
 }
 int64_t vp_index_duration(VPContext *ctx, int i) {
-    return ctx && ctx->index_scan_complete && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
+    return ctx && (ctx->index_scan_complete || ctx->index_import_streaming) &&
+        i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
 }
 
 #define VP_INDEX_FLAG_KEY 1u
@@ -589,6 +744,7 @@ const char *vp_core_build_id(void) { return VP_CORE_BUILD_ID; }
 int vp_stream_index(VPContext *ctx) { return ctx && ctx->stream_idx >= 0 ? ctx->stream_idx : -1; }
 
 int vp_index_abi_version(void) { return 2; }
+int vp_index_stream_abi_version(void) { return 1; }
 int vp_index_record_bytes(void) { return (int)sizeof(VPIndexRecordV2); }
 int vp_index_export_bytes(VPContext *ctx) {
     if (!ctx || !ctx->index_scan_complete || ctx->index_count > (size_t)(INT_MAX / (int)sizeof(VPIndexRecordV2))) return VP_ERR;
@@ -602,6 +758,28 @@ static uint32_t vp_index_record_flags(VPContext *ctx, size_t i) {
         ctx->index_pos[i] >= 0 && ctx->index_packet_size[i] >= 0 &&
         ctx->index_dts[i] != AV_NOPTS_VALUE) flags |= VP_INDEX_FLAG_SEEK_ANCHOR;
     return flags;
+}
+
+int vp_index_export_range(VPContext *ctx, int start, int count, void *output, int capacity_bytes) {
+    if (!ctx || !ctx->index_scan_progressive || start < 0 || count <= 0 || !output ||
+        count > INT_MAX / (int)sizeof(VPIndexRecordV2) ||
+        (size_t)start > ctx->index_stable_count ||
+        (size_t)count > ctx->index_stable_count - (size_t)start ||
+        capacity_bytes < count * (int)sizeof(VPIndexRecordV2)) return VP_ERR;
+    uint8_t *dst = (uint8_t *)output;
+    for (int j = 0; j < count; j++) {
+        size_t i = (size_t)start + (size_t)j;
+        VPIndexRecordV2 record = {
+            .pts = ctx->index_ticks[i],
+            .dts = ctx->index_dts[i],
+            .duration = ctx->index_duration[i],
+            .pos = ctx->index_pos[i],
+            .packet_size = ctx->index_packet_size[i],
+            .flags = vp_index_record_flags(ctx, i)
+        };
+        memcpy(dst + (size_t)j * sizeof(record), &record, sizeof(record));
+    }
+    return count;
 }
 
 int vp_index_export(VPContext *ctx, void *output, int capacity_bytes) {
@@ -622,77 +800,92 @@ int vp_index_export(VPContext *ctx, void *output, int capacity_bytes) {
     return (int)ctx->index_count;
 }
 
-int vp_index_import(VPContext *ctx, const void *input, int count) {
-    if (!ctx || !ctx->dec || !ctx->fmt || ctx->stream_idx < 0 || !input || count <= 0 ||
-        count > INT_MAX / (int)sizeof(VPIndexRecordV2) || ctx->index_count != 0 ||
-        ctx->index_seek_anchors != 0 || ctx->index_scan_started) return VP_ERR;
+int vp_index_import_begin(VPContext *ctx) {
+    if (!ctx || !ctx->dec || !ctx->fmt || ctx->stream_idx < 0 || ctx->index_count != 0 ||
+        ctx->index_seek_anchors != 0 || ctx->index_scan_started || ctx->index_import_streaming) return VP_ERR;
+    ctx->index_import_streaming = 1;
+    ctx->index_import_has_safe_ticks = 0;
+    ctx->index_import_next_seq = 0;
+    ctx->index_import_safe_ticks = INT64_MIN;
+    return VP_OK;
+}
 
-    size_t n = (size_t)count;
-    int64_t *ticks = malloc(n * sizeof(*ticks));
-    int *keys = malloc(n * sizeof(*keys));
-    int64_t *durations = malloc(n * sizeof(*durations));
-    int64_t *decode_times = malloc(n * sizeof(*decode_times));
-    int64_t *positions = malloc(n * sizeof(*positions));
-    int *sizes = malloc(n * sizeof(*sizes));
-    if (!ticks || !keys || !durations || !decode_times || !positions || !sizes) {
-        free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
-        return VP_ERR;
-    }
+int vp_index_import_batch(VPContext *ctx, const void *input, int count, int seq,
+                          int64_t safe_ticks, int final) {
+    if (!ctx || !ctx->index_import_streaming || ctx->index_scan_complete ||
+        seq != ctx->index_import_next_seq || count < 0 ||
+        (count > 0 && !input) || (final != 0 && final != 1) ||
+        count > INT_MAX / (int)sizeof(VPIndexRecordV2) ||
+        (ctx->index_import_has_safe_ticks && safe_ticks < ctx->index_import_safe_ticks) ||
+        (size_t)count > SIZE_MAX - ctx->index_count) return VP_ERR;
+    if (count == 0 && !final) return VP_ERR;
 
     int is_mpegts = ctx->fmt->iformat && !strcmp(ctx->fmt->iformat->name, "mpegts");
     const uint8_t *src = (const uint8_t *)input;
-    int64_t previous = 0;
+    int64_t previous = ctx->index_count ? ctx->index_ticks[ctx->index_count - 1] : INT64_MIN;
     int anchors = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (int j = 0; j < count; j++) {
         VPIndexRecordV2 record;
-        memcpy(&record, src + i * sizeof(record), sizeof(record));
+        memcpy(&record, src + (size_t)j * sizeof(record), sizeof(record));
         if ((record.flags & ~VP_INDEX_KNOWN_FLAGS) != 0 || record.packet_size < 0 ||
             record.pos < -1 ||
             ((record.flags & VP_INDEX_FLAG_SEEK_ANCHOR) &&
                 (!(record.flags & VP_INDEX_FLAG_KEY) || !is_mpegts || record.pos < 0 ||
                  record.dts == AV_NOPTS_VALUE)) ||
-            (i > 0 && record.pts < previous)) {
-            free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
-            return VP_ERR;
-        }
-        ticks[i] = record.pts;
-        keys[i] = (record.flags & VP_INDEX_FLAG_KEY) != 0;
-        durations[i] = record.duration;
-        decode_times[i] = record.dts;
-        positions[i] = record.pos;
-        sizes[i] = record.packet_size;
+            record.pts < previous || record.pts > safe_ticks) return VP_ERR;
         if (record.flags & VP_INDEX_FLAG_SEEK_ANCHOR) anchors++;
         previous = record.pts;
     }
+    if (ctx->index_count + (size_t)count > (size_t)(INT_MAX / (int)sizeof(int64_t)) ||
+        vp_index_reserve(ctx, ctx->index_count + (size_t)count) < 0) return VP_ERR;
 
-    // av_add_index_entry may allocate internally. On allocation failure the
-    // caller should discard this freshly opened context.
+    // av_add_index_entry may allocate internally. On failure the caller should
+    // discard this context because earlier anchors from this batch may exist.
     if (anchors) {
         AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
-        for (size_t i = 0; i < n; i++) {
+        for (int j = 0; j < count; j++) {
             VPIndexRecordV2 record;
-            memcpy(&record, src + i * sizeof(record), sizeof(record));
+            memcpy(&record, src + (size_t)j * sizeof(record), sizeof(record));
             if (!(record.flags & VP_INDEX_FLAG_SEEK_ANCHOR)) continue;
-            if (av_add_index_entry(stream, positions[i], decode_times[i], sizes[i], 0, AVINDEX_KEYFRAME) < 0) {
-                free(ticks); free(keys); free(durations); free(decode_times); free(positions); free(sizes);
-                return VP_ERR;
-            }
+            if (av_add_index_entry(stream, record.pos, record.dts, record.packet_size, 0,
+                                   AVINDEX_KEYFRAME) < 0) return VP_ERR;
         }
     }
 
-    free(ctx->index_ticks); free(ctx->index_key); free(ctx->index_duration);
-    free(ctx->index_dts); free(ctx->index_pos); free(ctx->index_packet_size);
-    ctx->index_ticks = ticks; ctx->index_key = keys; ctx->index_duration = durations;
-    ctx->index_dts = decode_times; ctx->index_pos = positions; ctx->index_packet_size = sizes;
-    ctx->index_count = n; ctx->index_capacity = n; ctx->index_seek_anchors = anchors;
-    ctx->index_scan_started = 1; ctx->index_scan_active = 0; ctx->index_scan_complete = 1; ctx->index_scan_error = 0;
-
-    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(ctx->dec);
-    vp_reset_decoder_state(ctx);
+    for (int j = 0; j < count; j++) {
+        VPIndexRecordV2 record;
+        memcpy(&record, src + (size_t)j * sizeof(record), sizeof(record));
+        size_t i = ctx->index_count++;
+        ctx->index_ticks[i] = record.pts;
+        ctx->index_key[i] = (record.flags & VP_INDEX_FLAG_KEY) != 0;
+        ctx->index_duration[i] = record.duration;
+        ctx->index_dts[i] = record.dts;
+        ctx->index_pos[i] = record.pos;
+        ctx->index_packet_size[i] = record.packet_size;
+        ctx->index_order[i] = ctx->index_next_order++;
+    }
+    ctx->index_seek_anchors += anchors;
+    ctx->index_stable_count = ctx->index_count;
+    ctx->index_import_safe_ticks = safe_ticks;
+    ctx->index_import_has_safe_ticks = 1;
+    ctx->index_import_next_seq++;
+    ctx->index_scan_started = 1;
+    if (final) {
+        ctx->index_import_streaming = 0;
+        ctx->index_scan_active = 0;
+        ctx->index_scan_complete = 1;
+        ctx->index_scan_error = 0;
+    }
     return count;
 }
 
+int vp_index_import(VPContext *ctx, const void *input, int count) {
+    if (!ctx || !input || count <= 0 || count > INT_MAX / (int)sizeof(VPIndexRecordV2)) return VP_ERR;
+    VPIndexRecordV2 last;
+    memcpy(&last, (const uint8_t *)input + ((size_t)count - 1) * sizeof(last), sizeof(last));
+    if (vp_index_import_begin(ctx) < 0) return VP_ERR;
+    return vp_index_import_batch(ctx, input, count, 0, last.pts, 1) < 0 ? VP_ERR : count;
+}
 static int vp_ensure_pixels(VPContext *ctx, int width, int height) {
     if (width <= 0 || height <= 0 || width > INT_MAX / 4 || (uint64_t)width * height * 4 > INT_MAX) return VP_ERR;
     size_t needed = (size_t)width * (size_t)height * 4;
