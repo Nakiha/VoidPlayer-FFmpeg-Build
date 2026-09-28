@@ -56,13 +56,46 @@ try {
         assert.equal(call('vp_index_export_range', ['number', 'number', 'number', 'number', 'number'],
           [ctx, streamedCount, count, ptr, bytes]), count);
         const records = core.HEAPU8.slice(ptr, ptr + bytes);
-        assert.equal(call('vp_index_import_batch',
+        if (streamSeq === 0 && count > 1) {
+          const view = new DataView(core.HEAPU8.buffer);
+          const firstPts = view.getBigInt64(ptr, true);
+          const secondPts = view.getBigInt64(ptr + 40, true);
+          view.setBigInt64(ptr + 40, firstPts - 1n, true);
+          assert.equal(call('vp_index_import_batch',
+            ['number', 'number', 'number', 'number', 'i64', 'number'],
+            [importCtx, ptr, count, streamSeq, safeTicks, 0]), -1,
+            'an out-of-order record must be rejected before append');
+          view.setBigInt64(ptr + 40, secondPts, true);
+        }
+        if (streamSeq > 0) {
+          const view = new DataView(core.HEAPU8.buffer);
+          const originalPts = view.getBigInt64(ptr, true);
+          const previousPts = call('vp_index_ticks', ['number', 'number'],
+            [importCtx, streamedCount - 1], 'i64');
+          view.setBigInt64(ptr, previousPts - 1n, true);
+          assert.equal(call('vp_index_import_batch',
+            ['number', 'number', 'number', 'number', 'i64', 'number'],
+            [importCtx, ptr, count, streamSeq, safeTicks, 0]), -1,
+            'a batch that inserts before the published prefix must be rejected');
+          view.setBigInt64(ptr, originalPts, true);
+        }
+                assert.equal(call('vp_index_import_batch',
           ['number', 'number', 'number', 'number', 'i64', 'number'],
           [importCtx, ptr, count, streamSeq, safeTicks, 0]), count);
         streamedBatches.push({ records, count, safeTicks });
       } finally { core._free(ptr); }
       streamedCount += count;
       streamSeq++;
+      if (streamSeq === 1) {
+        assert.equal(call('vp_index_import_batch',
+          ['number', 'number', 'number', 'number', 'i64', 'number'],
+          [importCtx, 0, 0, streamSeq + 1, safeTicks, 0]), -1,
+          'a skipped batch sequence must be rejected');
+        assert.equal(call('vp_index_import_batch',
+          ['number', 'number', 'number', 'number', 'i64', 'number'],
+          [importCtx, 0, 0, streamSeq, safeTicks - 1n, 0]), -1,
+          'a regressing safe frontier must be rejected');
+      }
       assert.equal(call('vp_index_count', ['number'], [importCtx]), streamedCount,
         'the importing decoder exposes only accepted batches');
       if (!partialSeek && streamedCount > 100) {
@@ -109,6 +142,7 @@ try {
     call('vp_index_scan_stable_ticks', ['number'], [ctx], 'i64'));
   assert.equal(streamedCount, call('vp_index_count', ['number'], [ctx]));
   assert.ok(partialSeek, 'a seek must complete using an imported partial index before EOF');
+  const count = call('vp_index_count', ['number'], [ctx]);
   const fullBytes = call('vp_index_export_bytes', ['number'], [ctx]);
   assert.equal(fullBytes, count * 40);
   const fullPtr = core._malloc(fullBytes);
@@ -133,7 +167,6 @@ try {
     'an empty terminal event must finalize a stream');
   assert.equal(call('vp_index_scan_complete', ['number'], [importCtx]), 1);
   assert.ok(steps > 1, 'the test must exercise multiple scan steps');
-  const count = call('vp_index_count', ['number'], [ctx]);
   assert.equal(count, 1750);
   assert.equal(call('vp_index_count', ['number'], [importCtx]), count);
   assert.ok(call('vp_index_seek_anchors', ['number'], [ctx]) >= 140);
