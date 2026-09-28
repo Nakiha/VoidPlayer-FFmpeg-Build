@@ -1,0 +1,56 @@
+name: WASM index ABI regression
+
+on:
+  pull_request:
+    branches:
+      - wasm
+    paths:
+      - '.github/workflows/test-wasm.yml'
+      - 'README.md'
+      - 'scripts/**'
+      - 'wasm/**'
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    name: WASM ABI v2 and MPEG-TS seek round-trip
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install build and fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build ffmpeg
+
+      - name: Create MPEG-TS regression sample
+        run: |
+          mkdir -p .build
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x90:rate=24" \
+            -frames:v 48 -an -c:v mpeg2video -g 12 -bf 2 -pix_fmt yuv420p \
+            -f mpegts .build/seek-regression.ts
+
+      - name: Build WASM core variants
+        run: |
+          chmod +x scripts/build-wasm.sh
+          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --clean --skip-package
+          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --mt --skip-package
+
+      - name: Test import, seek anchors, and random-seek pixels
+        run: |
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.1" .build/seek-regression.ts
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.1" .build/seek-regression.ts
