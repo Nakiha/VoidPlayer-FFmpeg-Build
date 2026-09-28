@@ -22,6 +22,11 @@ async function main() {
 
   const ctx = core.ccall('vp_create', 'number', [], []);
   if (!ctx) throw new Error('vp_create failed');
+  const indexAbi = core.ccall('vp_index_abi_version', 'number', [], []);
+  const indexRecordBytes = core.ccall('vp_index_record_bytes', 'number', [], []);
+  if (indexAbi !== 1 || indexRecordBytes !== 24) {
+    throw new Error('unexpected index ABI: version=' + indexAbi + ' recordBytes=' + indexRecordBytes);
+  }
 
   // Garbage input must fail cleanly, not crash.
   core.FS.writeFile('/garbage.bin', new Uint8Array([1, 2, 3, 4]));
@@ -49,6 +54,35 @@ async function main() {
     const count = core.ccall('vp_index_build', 'number', ['number'], [ctx]);
     console.log(`${name}: codec=${codec} ${width}x${height} tb=${tbNum}/${tbDen} frames=${count}`);
     if (count <= 0) throw new Error(`${name}: empty index`);
+
+    // The binary cache ABI must round-trip exactly and reject malformed records
+    // without replacing the already valid index.
+    const indexBytes = core.ccall('vp_index_export_bytes', 'number', ['number'], [ctx]);
+    if (indexBytes !== count * indexRecordBytes) throw new Error('${name}: wrong index byte length ' + indexBytes);
+    const indexBuffer = core._malloc(indexBytes);
+    if (!indexBuffer) throw new Error('${name}: index buffer allocation failed');
+    try {
+      const exported = core.ccall('vp_index_export', 'number', ['number', 'number', 'number'], [ctx, indexBuffer, indexBytes]);
+      if (exported !== count) throw new Error('${name}: export returned ' + exported);
+      const snapshot = core.HEAPU8.slice(indexBuffer, indexBuffer + indexBytes);
+      const view = new DataView(core.HEAPU8.buffer);
+      view.setUint32(indexBuffer + 16, 2, true); // key flag must be 0 or 1
+      const invalidImport = core.ccall('vp_index_import', 'number', ['number', 'number', 'number'], [ctx, indexBuffer, count]);
+      if (invalidImport >= 0) throw new Error('${name}: malformed index import unexpectedly succeeded');
+      if (core.ccall('vp_index_count', 'number', ['number'], [ctx]) !== count) {
+        throw new Error('${name}: rejected import changed the current index');
+      }
+      core.HEAPU8.set(snapshot, indexBuffer);
+      const imported = core.ccall('vp_index_import', 'number', ['number', 'number', 'number'], [ctx, indexBuffer, count]);
+      if (imported !== count) throw new Error('${name}: valid index import returned ' + imported);
+      const exportedAgain = core.ccall('vp_index_export', 'number', ['number', 'number', 'number'], [ctx, indexBuffer, indexBytes]);
+      if (exportedAgain !== count || !Buffer.from(core.HEAPU8.slice(indexBuffer, indexBuffer + indexBytes)).equals(Buffer.from(snapshot))) {
+        throw new Error('${name}: index import/export round-trip changed bytes');
+      }
+    } finally {
+      core._free(indexBuffer);
+    }
+
     const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, 0]));
     const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, count - 1]));
     console.log(`${name}: first=${first} last=${last}`);

@@ -48,6 +48,18 @@ typedef struct VPFrameInfo {
 _Static_assert(sizeof(VPFrameInfo) == 72, "frame ABI size");
 _Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 
+// Versioned binary record used to move a complete container index across the
+// JS/WASM boundary. The WASM ABI is little-endian and fixed at 24 bytes.
+typedef struct VPIndexRecordV1 {
+    int64_t ticks;
+    int64_t duration;
+    uint32_t key;
+    uint32_t reserved;
+} VPIndexRecordV1;
+_Static_assert(sizeof(VPIndexRecordV1) == 24, "index ABI v1 record size");
+_Static_assert(offsetof(VPIndexRecordV1, key) == 16, "index ABI v1 key offset");
+_Static_assert(offsetof(VPIndexRecordV1, reserved) == 20, "index ABI v1 reserved offset");
+
 typedef struct VPContext {
     AVFormatContext *fmt;
     AVCodecContext *dec;
@@ -391,6 +403,80 @@ int vp_index_is_key(VPContext *ctx, int i) {
 }
 int64_t vp_index_duration(VPContext *ctx, int i) {
     return ctx && i >= 0 && (size_t)i < ctx->index_count ? ctx->index_duration[i] : 0;
+}
+
+int vp_index_abi_version(void) { return 1; }
+int vp_index_record_bytes(void) { return (int)sizeof(VPIndexRecordV1); }
+
+// Number of bytes required to export the current index, or VP_ERR if the
+// record count cannot be represented by the wasm32 API.
+int vp_index_export_bytes(VPContext *ctx) {
+    if (!ctx || ctx->index_count > (size_t)(INT_MAX / (int)sizeof(VPIndexRecordV1))) return VP_ERR;
+    return (int)(ctx->index_count * sizeof(VPIndexRecordV1));
+}
+
+// Writes fixed-layout records to caller-owned WASM memory. Returns record
+// count on success; rejects undersized buffers without writing any records.
+int vp_index_export(VPContext *ctx, void *output, int capacity_bytes) {
+    int bytes = vp_index_export_bytes(ctx);
+    if (bytes <= 0 || !output || capacity_bytes < bytes) return VP_ERR;
+    uint8_t *dst = (uint8_t *)output;
+    for (size_t i = 0; i < ctx->index_count; i++) {
+        VPIndexRecordV1 record = {
+            .ticks = ctx->index_ticks[i],
+            .duration = ctx->index_duration[i],
+            .key = ctx->index_key[i] ? 1u : 0u,
+            .reserved = 0u
+        };
+        memcpy(dst + i * sizeof(record), &record, sizeof(record));
+    }
+    return (int)ctx->index_count;
+}
+
+// Replaces the current table only after every record has passed validation
+// and all replacement arrays have been allocated. Decode position is left
+// unchanged; normal callers import immediately after vp_open.
+int vp_index_import(VPContext *ctx, const void *input, int count) {
+    if (!ctx || !ctx->dec || ctx->stream_idx < 0 || !input || count <= 0 ||
+        count > INT_MAX / (int)sizeof(VPIndexRecordV1)) return VP_ERR;
+
+    size_t n = (size_t)count;
+    int64_t *ticks = malloc(n * sizeof(*ticks));
+    int *keys = malloc(n * sizeof(*keys));
+    int64_t *durations = malloc(n * sizeof(*durations));
+    if (!ticks || !keys || !durations) {
+        free(ticks);
+        free(keys);
+        free(durations);
+        return VP_ERR;
+    }
+
+    const uint8_t *src = (const uint8_t *)input;
+    int64_t previous = 0;
+    for (size_t i = 0; i < n; i++) {
+        VPIndexRecordV1 record;
+        memcpy(&record, src + i * sizeof(record), sizeof(record));
+        if (record.key > 1u || record.reserved != 0u || (i > 0 && record.ticks < previous)) {
+            free(ticks);
+            free(keys);
+            free(durations);
+            return VP_ERR;
+        }
+        ticks[i] = record.ticks;
+        keys[i] = (int)record.key;
+        durations[i] = record.duration;
+        previous = record.ticks;
+    }
+
+    free(ctx->index_ticks);
+    free(ctx->index_key);
+    free(ctx->index_duration);
+    ctx->index_ticks = ticks;
+    ctx->index_key = keys;
+    ctx->index_duration = durations;
+    ctx->index_count = n;
+    ctx->index_capacity = n;
+    return count;
 }
 
 static int vp_ensure_pixels(VPContext *ctx, int width, int height) {
