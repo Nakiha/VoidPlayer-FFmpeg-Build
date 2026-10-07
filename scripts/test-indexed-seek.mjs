@@ -37,7 +37,7 @@ try {
   assert.equal(call('vp_index_scan_stream_begin', ['number'], [ctx]), 1);
   assert.equal(call('vp_index_scan_complete', ['number'], [ctx]), 0);
   assert.equal(call('vp_index_count', ['number'], [ctx]), 0, 'legacy full-index view stays private while scanning');
-  assert.equal(call('vp_index_stream_abi_version'), 1, 'record-batch ABI must be present');
+  assert.equal(call('vp_index_stream_abi_version'), 2, 'record-batch ABI must be present');
 
   importCtx = call('vp_create');
   assert.equal(call('vp_open', ['number', 'string'], [importCtx, '/sample.ts']), 0);
@@ -49,25 +49,25 @@ try {
     assert.ok(stableCount >= streamedCount, 'published record count must be monotonic');
     while (streamedCount < stableCount) {
       const count = Math.min(128, stableCount - streamedCount);
-      const bytes = count * 40;
+      const bytes = count * 48;
       const ptr = core._malloc(bytes);
       assert.ok(ptr > 0);
       try {
         assert.equal(call('vp_index_export_range', ['number', 'number', 'number', 'number', 'number'],
           [ctx, streamedCount, count, ptr, bytes]), count);
         const records = core.HEAPU8.slice(ptr, ptr + bytes);
-        const batchSafeTicks = new DataView(core.HEAPU8.buffer).getBigInt64(ptr + (count - 1) * 40, true);
+        const batchSafeTicks = new DataView(core.HEAPU8.buffer).getBigInt64(ptr + (count - 1) * 48, true);
         assert.ok(batchSafeTicks <= safeTicks, 'a batch frontier cannot exceed the decoder frontier');
         if (streamSeq === 0 && count > 1) {
           const view = new DataView(core.HEAPU8.buffer);
           const firstPts = view.getBigInt64(ptr, true);
-          const secondPts = view.getBigInt64(ptr + 40, true);
-          view.setBigInt64(ptr + 40, firstPts - 1n, true);
+          const secondPts = view.getBigInt64(ptr + 48, true);
+          view.setBigInt64(ptr + 48, firstPts - 1n, true);
           assert.equal(call('vp_index_import_batch',
             ['number', 'number', 'number', 'number', 'i64', 'number'],
             [importCtx, ptr, count, streamSeq, batchSafeTicks, 0]), -1,
             'an out-of-order record must be rejected before append');
-          view.setBigInt64(ptr + 40, secondPts, true);
+          view.setBigInt64(ptr + 48, secondPts, true);
         }
         if (streamSeq > 0) {
           const view = new DataView(core.HEAPU8.buffer);
@@ -146,7 +146,7 @@ try {
   assert.ok(partialSeek, 'a seek must complete using an imported partial index before EOF');
   const count = call('vp_index_count', ['number'], [ctx]);
   const fullBytes = call('vp_index_export_bytes', ['number'], [ctx]);
-  assert.equal(fullBytes, count * 40);
+  assert.equal(fullBytes, count * 48);
   const fullPtr = core._malloc(fullBytes);
   assert.ok(fullPtr > 0);
   let expectedBytes;
