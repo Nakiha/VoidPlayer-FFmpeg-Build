@@ -67,6 +67,11 @@ async function main() {
     const count = core.ccall('vp_index_build', 'number', ['number'], [ctx]);
     console.log(`${name}: codec=${codec} ${width}x${height} tb=${tbNum}/${tbDen} frames=${count}`);
     if (count <= 0) throw new Error(`${name}: empty index`);
+    // Packet records without PTS remain in ABI v3 for analysis, but are not
+    // presentation targets. PS commonly has such a final packet.
+    const timed = Array.from({ length: count }, (_, i) => i).filter(i =>
+      core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, i]) !== -9223372036854775808n);
+    if (!timed.length) throw new Error(`${name}: no presentation timestamps`);
 
     // Round-trip the complete v3 index through a fresh decoder context and
     // compare an interior random-access frame, including MPEG-TS seek anchors.
@@ -94,7 +99,7 @@ async function main() {
       const imported = core.ccall('vp_index_import', 'number', ['number', 'number', 'number'], [importCtx, indexBuffer, count]);
       if (imported !== count) throw new Error(`${name}: valid import returned ${imported}`);
       if (core.ccall('vp_index_seek_anchors', 'number', ['number'], [importCtx]) !== anchorCount) throw new Error(`${name}: seek anchor count changed on import`);
-      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, Math.floor(count * 0.73)]));
+      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed[Math.floor(timed.length * 0.73)]]));
       function hashFrame(context) {
         const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [context, BigInt(target)]);
         if (result !== 1 || Number(core.ccall('vp_last_ticks', 'i64', ['number'], [context])) !== target) throw new Error(`${name}: random seek failed after index transfer`);
@@ -112,11 +117,11 @@ async function main() {
       core._free(indexBuffer);
       core.ccall('vp_destroy', null, ['number'], [importCtx]);
     }
-    const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, 0]));
-    const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, count - 1]));
+    const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed[0]]));
+    const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed.at(-1)]));
     console.log(`${name}: first=${first} last=${last}`);
     // Extract first, second and last frame; verify exact pts and pixel bytes.
-    for (const idx of [...new Set([0, 1, count - 1])]) {
+    for (const idx of [...new Set([timed[0], timed[Math.min(1, timed.length - 1)], timed.at(-1)])]) {
       const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, idx]));
       const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [ctx, BigInt(target)]);
       const actual = Number(core.ccall('vp_last_ticks', 'i64', ['number'], [ctx]));
