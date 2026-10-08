@@ -9,17 +9,20 @@ on:
       - 'README.md'
       - 'scripts/**'
       - 'wasm/**'
+      - 'profiles/**'
 
 permissions:
   contents: read
 
 jobs:
   wasm:
-    name: WASM ABI v2 and MPEG-TS seek round-trip
+    name: WASM ABI v3, corruption prefixes and MPEG-TS seek round-trip
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -55,6 +58,20 @@ jobs:
           node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.1" .build/seek-regression.ts
           node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.1" --stem voidplayer-core-mt .build/seek-regression.ts
 
+      - name: Check MPEG-PS video probing after decoder trimming
+        run: |
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x96:rate=25" \
+            -t 2 -an -c:v mpeg2video -g 12 -f mpeg .build/probe-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 .build/probe-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt .build/probe-regression.mpg
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.build/probe-regression.mpg').read_bytes()
+          Path('.build/probe-tail.mpg').write_bytes(source + bytes([0xa5]) * (190 * 1024))
+          PY
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 .build/probe-tail.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt .build/probe-tail.mpg
+
       - name: Create long B-frame TS sample
         run: |
           ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=128x96:rate=25" \
@@ -65,3 +82,14 @@ jobs:
         run: |
           node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js .build/indexed-seek-regression.ts
           node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js .build/indexed-seek-regression.ts
+
+      - name: Test corrupt tails, retained B pictures, imported prefixes and IO failures
+        run: |
+          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js" .build/indexed-seek-regression.ts
+          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js" .build/indexed-seek-regression.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corruption-core
+          path: dist/voidplayer-ffmpeg-wasm*/
+          if-no-files-found: error

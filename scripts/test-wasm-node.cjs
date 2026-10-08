@@ -33,12 +33,12 @@ async function main() {
   if (!ctx) throw new Error('vp_create failed');
   const indexAbi = core.ccall('vp_index_abi_version', 'number', [], []);
   const indexRecordBytes = core.ccall('vp_index_record_bytes', 'number', [], []);
-  if (indexAbi !== 2 || indexRecordBytes !== 40) throw new Error('unexpected index ABI v2: ' + indexAbi + '/' + indexRecordBytes);
+  if (indexAbi !== 3 || indexRecordBytes !== 48) throw new Error('unexpected index ABI v3: ' + indexAbi + '/' + indexRecordBytes);
   if (typeof core._vp_index_export !== 'function' || typeof core._vp_index_import !== 'function' || typeof core._vp_core_build_id !== 'function' ||
       typeof core._vp_index_scan_begin !== 'function' || typeof core._vp_index_scan_step !== 'function' ||
       typeof core._vp_index_scan_complete !== 'function' || typeof core._vp_index_scan_packets !== 'function' ||
       typeof core._vp_index_scan_bytes !== 'function') {
-    throw new Error('index ABI v2 or incremental scan exports are missing');
+    throw new Error('index ABI v3 or incremental scan exports are missing');
   }
 
   // Garbage input must fail cleanly, not crash.
@@ -57,7 +57,7 @@ async function main() {
       console.log(`${name}: vp_open failed (${opened})`);
       core.FS.unlink(vpath);
       core.ccall('vp_destroy', null, ['number'], [ctx]);
-      continue;
+      throw new Error(`${name}: required sample failed to open (${opened})`);
     }
     const width = core.ccall('vp_width', 'number', ['number'], [ctx]);
     const height = core.ccall('vp_height', 'number', ['number'], [ctx]);
@@ -67,13 +67,18 @@ async function main() {
     const count = core.ccall('vp_index_build', 'number', ['number'], [ctx]);
     console.log(`${name}: codec=${codec} ${width}x${height} tb=${tbNum}/${tbDen} frames=${count}`);
     if (count <= 0) throw new Error(`${name}: empty index`);
+    // Packet records without PTS remain in ABI v3 for analysis, but are not
+    // presentation targets. PS commonly has such a final packet.
+    const timed = Array.from({ length: count }, (_, i) => i).filter(i =>
+      core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, i]) !== -9223372036854775808n);
+    if (!timed.length) throw new Error(`${name}: no presentation timestamps`);
 
-    // Round-trip the complete v2 index through a fresh decoder context and
+    // Round-trip the complete v3 index through a fresh decoder context and
     // compare an interior random-access frame, including MPEG-TS seek anchors.
     const anchorCount = core.ccall('vp_index_seek_anchors', 'number', ['number'], [ctx]);
     if (/\.(?:ts|m2ts)$/i.test(name) && anchorCount <= 0) throw new Error(`${name}: MPEG-TS index has no demux seek anchors`);
     const indexBytes = core.ccall('vp_index_export_bytes', 'number', ['number'], [ctx]);
-    if (indexBytes !== count * 40) throw new Error(`${name}: wrong index byte length ${indexBytes}`);
+    if (indexBytes !== count * 48) throw new Error(`${name}: wrong index byte length ${indexBytes}`);
     const indexBuffer = core._malloc(indexBytes);
     if (!indexBuffer) throw new Error(`${name}: index buffer allocation failed`);
     const importCtx = core.ccall('vp_create', 'number', [], []);
@@ -94,7 +99,7 @@ async function main() {
       const imported = core.ccall('vp_index_import', 'number', ['number', 'number', 'number'], [importCtx, indexBuffer, count]);
       if (imported !== count) throw new Error(`${name}: valid import returned ${imported}`);
       if (core.ccall('vp_index_seek_anchors', 'number', ['number'], [importCtx]) !== anchorCount) throw new Error(`${name}: seek anchor count changed on import`);
-      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, Math.floor(count * 0.73)]));
+      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed[Math.floor(timed.length * 0.73)]]));
       function hashFrame(context) {
         const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [context, BigInt(target)]);
         if (result !== 1 || Number(core.ccall('vp_last_ticks', 'i64', ['number'], [context])) !== target) throw new Error(`${name}: random seek failed after index transfer`);
@@ -107,16 +112,16 @@ async function main() {
       const expectedHash = hashFrame(ctx);
       const importedHash = hashFrame(importCtx);
       if (expectedHash !== importedHash) throw new Error(`${name}: imported random-seek pixel hash differs`);
-      console.log(`${name}: v2 import/export anchors=${anchorCount} random-seek hash=${importedHash.slice(0, 12)}`);
+      console.log(`${name}: v3 import/export anchors=${anchorCount} random-seek hash=${importedHash.slice(0, 12)}`);
     } finally {
       core._free(indexBuffer);
       core.ccall('vp_destroy', null, ['number'], [importCtx]);
     }
-    const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, 0]));
-    const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, count - 1]));
+    const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed[0]]));
+    const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, timed.at(-1)]));
     console.log(`${name}: first=${first} last=${last}`);
     // Extract first, second and last frame; verify exact pts and pixel bytes.
-    for (const idx of [...new Set([0, 1, count - 1])]) {
+    for (const idx of [...new Set([timed[0], timed[Math.min(1, timed.length - 1)], timed.at(-1)])]) {
       const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, idx]));
       const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [ctx, BigInt(target)]);
       const actual = Number(core.ccall('vp_last_ticks', 'i64', ['number'], [ctx]));

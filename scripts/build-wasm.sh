@@ -92,7 +92,7 @@ fi
 # Configure FFmpeg (trimmed to the fallback decode path)
 # ---------------------------------------------------------------------------
 
-DEMUXERS="mov matroska mpegts mpegps avi"
+DEMUXERS="mov matroska mpegts mpegps mpegvideo avi"
 DECODERS="ffv1 h264 hevc mpeg1video mpeg2video mpeg4 mjpeg prores vvc vp8 vp9"
 PARSERS="ffv1 h264 hevc mpegvideo mpeg4video mjpeg vvc vp8 vp9"
 
@@ -202,7 +202,7 @@ step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 

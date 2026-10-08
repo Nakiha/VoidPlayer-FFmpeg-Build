@@ -102,6 +102,9 @@ typedef struct VPContext {
     int index_scan_active;
     int index_scan_complete;
     int index_scan_error;
+    int index_prefix;
+    int64_t index_truncated_at;
+    int64_t index_end_dts;
     int index_scan_packets;
     int index_scan_decoded_packets;
     uint8_t *index_import_ordinals;
@@ -142,6 +145,7 @@ static int vp_avio_read(void *opaque, uint8_t *buf, int size) {
     VpBlobIO *io = (VpBlobIO *)opaque;
     long got = vp_js_read(io->handle, (double)io->pos, buf, size);
     if (got < 0) return AVERROR(EIO);
+    if ((!got && io->pos < io->size) || got > size || got > io->size - io->pos) return AVERROR(EIO);
     io->pos += got;
     return got == 0 ? AVERROR_EOF : (int)got;
 }
@@ -246,6 +250,9 @@ void vp_close_input(VPContext *ctx) {
     ctx->index_scan_active = 0;
     ctx->index_scan_complete = 0;
     ctx->index_scan_error = 0;
+    ctx->index_prefix = 0;
+    ctx->index_truncated_at = -1;
+    ctx->index_end_dts = AV_NOPTS_VALUE;
     ctx->index_scan_packets = 0;
     ctx->index_scan_decoded_packets = 0;
     ctx->index_scan_bytes = 0;
@@ -429,6 +436,14 @@ static int vp_decode_one(VPContext *ctx) {
             av_packet_unref(ctx->pkt);
             continue;
         }
+        // A damaged index is a terminal decode-order prefix. Never feed the
+        // discarded GOP back to the decoder when draining its last pictures.
+        if (ctx->index_prefix && ctx->pkt->dts != AV_NOPTS_VALUE &&
+            ctx->pkt->dts > ctx->index_end_dts) {
+            av_packet_unref(ctx->pkt);
+            avcodec_send_packet(ctx->dec, NULL);
+            continue;
+        }
         ret = avcodec_send_packet(ctx->dec, ctx->pkt);
         av_packet_unref(ctx->pkt);
         if (ret < 0 && ret != AVERROR(EAGAIN)) return VP_ERR;
@@ -603,6 +618,53 @@ static int vp_index_scan_finish(VPContext *ctx) {
     return VP_OK;
 }
 
+// Structural corruption may end an otherwise usable recording. Drop the
+// entire last GOP, including reordered pictures, rather than advertising a
+// partial packet or dependent tail as playable. IO/allocation errors and
+// already-published progressive ranges must never take this path.
+static int vp_index_finish_prefix(VPContext *ctx) {
+    if (ctx->index_scan_progressive || ctx->index_stable_count ||
+        !ctx->fmt->pb || (ctx->fmt->pb->error && ctx->fmt->pb->error != AVERROR_EOF)) return VP_ERR;
+    size_t cut = 0;
+    for (size_t i = 1; i < ctx->index_count; i++)
+        if (ctx->index_key[i]) cut = i;
+    if (!cut || ctx->index_pos[cut] < 0 || ctx->index_dts[cut] == AV_NOPTS_VALUE) return VP_ERR;
+    int64_t end_dts = AV_NOPTS_VALUE;
+    for (size_t i = 0; i < cut; i++) {
+        if (ctx->index_ticks[i] == AV_NOPTS_VALUE || ctx->index_dts[i] == AV_NOPTS_VALUE ||
+            (i && ctx->index_dts[i] < ctx->index_dts[i - 1]) ||
+            ctx->index_dts[i] >= ctx->index_dts[cut]) return VP_ERR;
+        end_dts = ctx->index_dts[i];
+    }
+    ctx->index_prefix = 1;
+    ctx->index_truncated_at = ctx->index_pos[cut];
+    ctx->index_end_dts = end_dts;
+    ctx->index_count = cut;
+    ctx->index_seek_anchors = 0;
+    if (!strcmp(ctx->fmt->iformat->name, "mpegts"))
+        for (size_t i = 0; i < cut; i++) if (ctx->index_key[i] && ctx->index_pos[i] >= 0) ctx->index_seek_anchors++;
+    return vp_index_scan_finish(ctx);
+}
+
+int vp_index_integrity(VPContext *ctx) { return ctx && ctx->index_prefix; }
+int64_t vp_index_truncated_at(VPContext *ctx) { return ctx && ctx->index_prefix ? ctx->index_truncated_at : -1; }
+int64_t vp_index_end_dts(VPContext *ctx) { return ctx && ctx->index_prefix ? ctx->index_end_dts : AV_NOPTS_VALUE; }
+int vp_index_recovery_abi_version(void) { return 1; }
+int vp_index_apply_prefix(VPContext *ctx, int64_t truncated_at, int64_t end_dts) {
+    if (!ctx || !ctx->index_scan_complete || !ctx->index_count || truncated_at < 0 ||
+        end_dts == AV_NOPTS_VALUE) return VP_ERR;
+    int64_t largest = AV_NOPTS_VALUE;
+    for (size_t i = 0; i < ctx->index_count; i++) {
+        if (ctx->index_dts[i] == AV_NOPTS_VALUE || ctx->index_dts[i] > end_dts) return VP_ERR;
+        if (largest == AV_NOPTS_VALUE || ctx->index_dts[i] > largest) largest = ctx->index_dts[i];
+    }
+    if (largest != end_dts) return VP_ERR;
+    ctx->index_prefix = 1;
+    ctx->index_truncated_at = truncated_at;
+    ctx->index_end_dts = end_dts;
+    return VP_OK;
+}
+
 // Begin a demux scan. MPEG-TS may publish only records at or before the last
 // timestamp retired by the decoder in presentation order. Other demuxers keep
 // the complete-index behavior until they provide their own stability proof. packet_budget passed to step limits all demux
@@ -652,6 +714,9 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
         }
         if (ret < 0) {
             av_packet_unref(ctx->pkt);
+            int is_ts = ctx->fmt->iformat && !strcmp(ctx->fmt->iformat->name, "mpegts");
+            if ((ret == AVERROR_INVALIDDATA || (is_ts && ret == AVERROR(EAGAIN))) &&
+                vp_index_finish_prefix(ctx) == VP_OK) return processed;
             ctx->index_scan_error = 1;
             ctx->index_scan_active = 0;
             return VP_ERR;
@@ -664,6 +729,13 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
         if (packet_end > ctx->index_scan_bytes) ctx->index_scan_bytes = packet_end;
         if (ctx->io && ctx->io->pos > ctx->index_scan_bytes) ctx->index_scan_bytes = ctx->io->pos;
         if (ctx->pkt->stream_index == ctx->stream_idx) {
+            if (ctx->pkt->flags & AV_PKT_FLAG_CORRUPT) {
+                av_packet_unref(ctx->pkt);
+                if (vp_index_finish_prefix(ctx) == VP_OK) return processed;
+                ctx->index_scan_error = 1;
+                ctx->index_scan_active = 0;
+                return VP_ERR;
+            }
             if (ctx->index_scan_progressive && ctx->pkt->pts != AV_NOPTS_VALUE &&
                 ctx->index_stable_count > 0 &&
                 ctx->pkt->pts < ctx->index_ticks[ctx->index_stable_count - 1]) {
