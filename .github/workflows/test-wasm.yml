@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   wasm:
-    name: WASM ABI v2 and MPEG-TS seek round-trip
+    name: WASM ABI v3, corruption prefixes and MPEG-TS seek round-trip
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -65,3 +65,14 @@ jobs:
         run: |
           node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js .build/indexed-seek-regression.ts
           node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js .build/indexed-seek-regression.ts
+
+      - name: Test corrupt tails, retained B pictures, imported prefixes and IO failures
+        run: |
+          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js" .build/indexed-seek-regression.ts
+          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js" .build/indexed-seek-regression.ts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corruption-core
+          path: dist/voidplayer-ffmpeg-wasm*/
+          if-no-files-found: error

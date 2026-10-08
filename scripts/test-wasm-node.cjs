@@ -33,12 +33,12 @@ async function main() {
   if (!ctx) throw new Error('vp_create failed');
   const indexAbi = core.ccall('vp_index_abi_version', 'number', [], []);
   const indexRecordBytes = core.ccall('vp_index_record_bytes', 'number', [], []);
-  if (indexAbi !== 2 || indexRecordBytes !== 40) throw new Error('unexpected index ABI v2: ' + indexAbi + '/' + indexRecordBytes);
+  if (indexAbi !== 3 || indexRecordBytes !== 48) throw new Error('unexpected index ABI v3: ' + indexAbi + '/' + indexRecordBytes);
   if (typeof core._vp_index_export !== 'function' || typeof core._vp_index_import !== 'function' || typeof core._vp_core_build_id !== 'function' ||
       typeof core._vp_index_scan_begin !== 'function' || typeof core._vp_index_scan_step !== 'function' ||
       typeof core._vp_index_scan_complete !== 'function' || typeof core._vp_index_scan_packets !== 'function' ||
       typeof core._vp_index_scan_bytes !== 'function') {
-    throw new Error('index ABI v2 or incremental scan exports are missing');
+    throw new Error('index ABI v3 or incremental scan exports are missing');
   }
 
   // Garbage input must fail cleanly, not crash.
@@ -68,12 +68,12 @@ async function main() {
     console.log(`${name}: codec=${codec} ${width}x${height} tb=${tbNum}/${tbDen} frames=${count}`);
     if (count <= 0) throw new Error(`${name}: empty index`);
 
-    // Round-trip the complete v2 index through a fresh decoder context and
+    // Round-trip the complete v3 index through a fresh decoder context and
     // compare an interior random-access frame, including MPEG-TS seek anchors.
     const anchorCount = core.ccall('vp_index_seek_anchors', 'number', ['number'], [ctx]);
     if (/\.(?:ts|m2ts)$/i.test(name) && anchorCount <= 0) throw new Error(`${name}: MPEG-TS index has no demux seek anchors`);
     const indexBytes = core.ccall('vp_index_export_bytes', 'number', ['number'], [ctx]);
-    if (indexBytes !== count * 40) throw new Error(`${name}: wrong index byte length ${indexBytes}`);
+    if (indexBytes !== count * 48) throw new Error(`${name}: wrong index byte length ${indexBytes}`);
     const indexBuffer = core._malloc(indexBytes);
     if (!indexBuffer) throw new Error(`${name}: index buffer allocation failed`);
     const importCtx = core.ccall('vp_create', 'number', [], []);
@@ -107,7 +107,7 @@ async function main() {
       const expectedHash = hashFrame(ctx);
       const importedHash = hashFrame(importCtx);
       if (expectedHash !== importedHash) throw new Error(`${name}: imported random-seek pixel hash differs`);
-      console.log(`${name}: v2 import/export anchors=${anchorCount} random-seek hash=${importedHash.slice(0, 12)}`);
+      console.log(`${name}: v3 import/export anchors=${anchorCount} random-seek hash=${importedHash.slice(0, 12)}`);
     } finally {
       core._free(indexBuffer);
       core.ccall('vp_destroy', null, ['number'], [importCtx]);
