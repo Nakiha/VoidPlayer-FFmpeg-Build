@@ -92,7 +92,7 @@ fi
 # Configure FFmpeg (trimmed to the fallback decode path)
 # ---------------------------------------------------------------------------
 
-DEMUXERS="mov matroska mpegts mpegps avi"
+DEMUXERS="mov matroska mpegts mpegps mpegvideo avi"
 DECODERS="ffv1 h264 hevc mpeg1video mpeg2video mpeg4 mjpeg prores vvc vp8 vp9"
 PARSERS="ffv1 h264 hevc mpegvideo mpeg4video mjpeg vvc vp8 vp9"
 

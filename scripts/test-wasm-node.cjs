@@ -57,7 +57,7 @@ async function main() {
       console.log(`${name}: vp_open failed (${opened})`);
       core.FS.unlink(vpath);
       core.ccall('vp_destroy', null, ['number'], [ctx]);
-      continue;
+      throw new Error(`${name}: required sample failed to open (${opened})`);
     }
     const width = core.ccall('vp_width', 'number', ['number'], [ctx]);
     const height = core.ccall('vp_height', 'number', ['number'], [ctx]);

@@ -64,6 +64,13 @@ jobs:
             -t 2 -an -c:v mpeg2video -g 12 -f mpeg .build/probe-regression.mpg
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 .build/probe-regression.mpg
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt .build/probe-regression.mpg
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.build/probe-regression.mpg').read_bytes()
+          Path('.build/probe-tail.mpg').write_bytes(source + bytes([0xa5]) * (190 * 1024))
+          PY
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 .build/probe-tail.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt .build/probe-tail.mpg
 
       - name: Create long B-frame TS sample
         run: |
