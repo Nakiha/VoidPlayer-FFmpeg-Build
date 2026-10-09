@@ -46,6 +46,11 @@ jobs:
           bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --clean --skip-package
           bash scripts/build-wasm.sh --ffmpeg-ref n9.0.1 --mt --skip-package
 
+      - name: Verify high-depth PQ and HLG planes against independent FFmpeg
+        run: |
+          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js
+          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1/voidplayer-core-mt.js
+
       - name: Create MPEG-TS regression sample
         run: |
           mkdir -p .build

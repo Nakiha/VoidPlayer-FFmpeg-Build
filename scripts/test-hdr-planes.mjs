@@ -15,7 +15,7 @@ try {
   const call = (name, types = [], args = [], result = 'number') => core.ccall(name, result, types, args);
   for (const [transfer, tag] of [['smpte2084', 16], ['arib-std-b67', 18]]) {
     const file = path.join(root, `${transfer}.mp4`), raw = path.join(root, 'reference.yuv');
-    ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=24', '-frames:v', '4', '-an', '-vf', 'format=yuv420p10le', '-c:v', 'libx265', '-x265-params', 'pools=1:frame-threads=1:log-level=error', '-color_primaries', 'bt2020', '-color_trc', transfer, '-colorspace', 'bt2020nc', file]);
+    ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=64x48:rate=24', '-frames:v', '4', '-an', '-vf', 'format=yuv420p10le', '-c:v', 'libx265', '-x265-params', `pools=1:frame-threads=1:log-level=error:colorprim=9:transfer=${tag}:colormatrix=9:range=limited`, '-color_primaries', 'bt2020', '-color_trc', transfer, '-colorspace', 'bt2020nc', file]);
     ffmpeg(['-i', file, '-frames:v', '1', '-pix_fmt', 'yuv420p10le', '-f', 'rawvideo', raw]);
     const expected = readFileSync(raw), ctx = call('vp_create');
     core.FS.writeFile('/hdr.mp4', readFileSync(file));
