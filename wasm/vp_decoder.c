@@ -1048,13 +1048,15 @@ static int vp_convert(VPContext *ctx) {
         !(desc->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_PAL | AV_PIX_FMT_FLAG_BITSTREAM)) &&
         (desc->flags & AV_PIX_FMT_FLAG_PLANAR) && desc->comp[0].plane == 0 && desc->comp[1].plane == 1 &&
         (desc->comp[2].plane == 2 || desc->comp[2].plane == 1);
-    // Preserve existing HDR behavior until a high precision HDR renderer exists.
-    if (frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67) planar = 0;
-    // Formats/colorimetry outside the SDR renderer remain visibly tagged RGBA
+    // HDR must retain its original integer samples for the web HDR renderer.
+    // Do not claim raw BT.2100 for ambiguous tags or an 8-bit RGB conversion.
+    int hdr = frame->color_trc == AVCOL_TRC_SMPTE2084 || frame->color_trc == AVCOL_TRC_ARIB_STD_B67;
+    if (hdr && (frame->color_primaries != AVCOL_PRI_BT2020 || frame->colorspace != AVCOL_SPC_BT2020_NCL || !desc || desc->comp[0].depth < 10)) planar = 0;
+    // Formats/colorimetry outside the supported renderer remain tagged RGBA
     // fallback. Never reinterpret unsupported matrix/transfer as BT.709.
     if (frame->colorspace != AVCOL_SPC_UNSPECIFIED && frame->colorspace != AVCOL_SPC_BT709 && frame->colorspace != AVCOL_SPC_BT470BG && frame->colorspace != AVCOL_SPC_SMPTE170M && frame->colorspace != AVCOL_SPC_BT2020_NCL) planar = 0;
     if (frame->color_primaries != AVCOL_PRI_UNSPECIFIED && frame->color_primaries != AVCOL_PRI_BT709 && frame->color_primaries != AVCOL_PRI_BT470BG && frame->color_primaries != AVCOL_PRI_SMPTE170M && frame->color_primaries != AVCOL_PRI_BT2020) planar = 0;
-    if (frame->color_trc != AVCOL_TRC_UNSPECIFIED && frame->color_trc != AVCOL_TRC_BT709 && frame->color_trc != AVCOL_TRC_SMPTE170M && frame->color_trc != AVCOL_TRC_IEC61966_2_1 && frame->color_trc != AVCOL_TRC_BT2020_10 && frame->color_trc != AVCOL_TRC_BT2020_12) planar = 0;
+    if (frame->color_trc != AVCOL_TRC_UNSPECIFIED && frame->color_trc != AVCOL_TRC_BT709 && frame->color_trc != AVCOL_TRC_SMPTE170M && frame->color_trc != AVCOL_TRC_IEC61966_2_1 && frame->color_trc != AVCOL_TRC_BT2020_10 && frame->color_trc != AVCOL_TRC_BT2020_12 && !hdr) planar = 0;
     int depth = desc ? desc->comp[0].depth : 0;
     if (depth < 8 || depth > 16) planar = 0;
     if (planar) {
