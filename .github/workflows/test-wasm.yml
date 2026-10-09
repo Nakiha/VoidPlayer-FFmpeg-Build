@@ -77,6 +77,13 @@ jobs:
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 .build/probe-tail.mpg
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt .build/probe-tail.mpg
 
+      - name: Check MPEG-PS index retains untimed packets without seeking them
+        run: |
+          ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x96:rate=25" \
+            -t 2 -an -c:v mpeg2video -g 12 -packetsize 4096 -f mpeg .build/probe-untimed.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 --require-untimed .build/probe-untimed.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.1 --stem voidplayer-core-mt --require-untimed .build/probe-untimed.mpg
+
       - name: Create long B-frame TS sample
         run: |
           ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=128x96:rate=25" \

@@ -1,5 +1,5 @@
 // Node smoke/integration harness for the WASM decoder core.
-// Usage: node scripts/test-wasm-node.cjs <core-dir> [--stem <core-stem>] [sample-file ...]
+// Usage: node scripts/test-wasm-node.cjs <core-dir> [--stem <core-stem>] [--require-untimed] [sample-file ...]
 // Without sample files it only checks that the module loads and rejects
 // garbage input. Sample files (absolute paths) get a full index + extract
 // verification.
@@ -18,6 +18,9 @@ async function main() {
     coreStem = args[stemIndex + 1];
     args.splice(stemIndex, 2);
   }
+  const untimedIndex = args.indexOf('--require-untimed');
+  const requireUntimed = untimedIndex >= 0;
+  if (requireUntimed) args.splice(untimedIndex, 1);
   const samples = args;
   if (!coreDir) {
     console.error('usage: node scripts/test-wasm-node.cjs <core-dir> [--stem <core-stem>] [sample-file ...]');
@@ -67,6 +70,17 @@ async function main() {
     const count = core.ccall('vp_index_build', 'number', ['number'], [ctx]);
     console.log(`${name}: codec=${codec} ${width}x${height} tb=${tbNum}/${tbDen} frames=${count}`);
     if (count <= 0) throw new Error(`${name}: empty index`);
+    // ABI v3 retains untimed packets after the presentation-sorted records.
+    // They round-trip through the cache, but cannot be exact-PTS seek targets.
+    const ticks = Array.from({ length: count }, (_, i) => core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, i]));
+    const noPts = -(1n << 63n);
+    const timedIndices = ticks.flatMap((value, i) => value === noPts ? [] : [i]);
+    if (!timedIndices.length) throw new Error(`${name}: no timestamped presentation records`);
+    if (requireUntimed && timedIndices.length === count) throw new Error(`${name}: expected retained untimed packet records`);
+    for (let i = 0; i < timedIndices.length; i++) {
+      if (timedIndices[i] !== i || (i > 0 && ticks[i] < ticks[i - 1])) throw new Error(`${name}: invalid presentation ordering`);
+    }
+    console.log(`${name}: timestamped=${timedIndices.length} untimed=${count - timedIndices.length}`);
 
     // Round-trip the complete v3 index through a fresh decoder context and
     // compare an interior random-access frame, including MPEG-TS seek anchors.
@@ -94,10 +108,14 @@ async function main() {
       const imported = core.ccall('vp_index_import', 'number', ['number', 'number', 'number'], [importCtx, indexBuffer, count]);
       if (imported !== count) throw new Error(`${name}: valid import returned ${imported}`);
       if (core.ccall('vp_index_seek_anchors', 'number', ['number'], [importCtx]) !== anchorCount) throw new Error(`${name}: seek anchor count changed on import`);
-      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, Math.floor(count * 0.73)]));
+      if (core.ccall('vp_index_export', 'number', ['number', 'number', 'number'], [importCtx, indexBuffer, indexBytes]) !== count ||
+          !Buffer.from(core.HEAPU8.slice(indexBuffer, indexBuffer + indexBytes)).equals(Buffer.from(snapshot))) {
+        throw new Error(`${name}: complete packet records changed on import/export`);
+      }
+      const target = ticks[timedIndices[Math.floor(timedIndices.length * 0.73)]];
       function hashFrame(context) {
-        const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [context, BigInt(target)]);
-        if (result !== 1 || Number(core.ccall('vp_last_ticks', 'i64', ['number'], [context])) !== target) throw new Error(`${name}: random seek failed after index transfer`);
+        const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [context, target]);
+        if (result !== 1 || core.ccall('vp_last_ticks', 'i64', ['number'], [context]) !== target) throw new Error(`${name}: random seek failed after index transfer`);
         const info = core.ccall('vp_frame_info', 'number', ['number'], [context]);
         const bytes = new DataView(core.HEAPU8.buffer).getInt32(info + 36, true);
         const pixels = core.ccall('vp_pixels', 'number', ['number'], [context]);
@@ -112,14 +130,14 @@ async function main() {
       core._free(indexBuffer);
       core.ccall('vp_destroy', null, ['number'], [importCtx]);
     }
-    const first = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, 0]));
-    const last = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, count - 1]));
+    const first = ticks[timedIndices[0]];
+    const last = ticks[timedIndices.at(-1)];
     console.log(`${name}: first=${first} last=${last}`);
-    // Extract first, second and last frame; verify exact pts and pixel bytes.
-    for (const idx of [...new Set([0, 1, count - 1])]) {
-      const target = Number(core.ccall('vp_index_ticks', 'i64', ['number', 'number'], [ctx, idx]));
-      const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [ctx, BigInt(target)]);
-      const actual = Number(core.ccall('vp_last_ticks', 'i64', ['number'], [ctx]));
+    // Extract the first, second and last timestamped frame; verify exact PTS.
+    for (const idx of [...new Set([timedIndices[0], timedIndices[Math.min(1, timedIndices.length - 1)], timedIndices.at(-1)])]) {
+      const target = ticks[idx];
+      const result = core.ccall('vp_extract', 'number', ['number', 'i64'], [ctx, target]);
+      const actual = core.ccall('vp_last_ticks', 'i64', ['number'], [ctx]);
       if (result !== 1 || actual !== target) {
         throw new Error(`${name}: extract frame ${idx} -> result=${result} ticks=${actual} (expected ${target})`);
       }
