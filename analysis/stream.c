@@ -50,7 +50,7 @@ static void append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,
     p->blocks[p->count++]=(Block){x,y,w,h,qp,mode,depth};
 }
 int ff_voidplayer_vachunk_is_active(void){return decoder!=NULL&&!failure;}
-void ff_voidplayer_vachunk_write_intra_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t intra,uint8_t mip,uint8_t isp,uint32_t bits){append(i,x,y,w,h,q,1,d);}
+void ff_voidplayer_vachunk_write_intra_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t intra,uint8_t mip,uint8_t isp,uint32_t bits){append(i,x,y,w,h,q,1,d);if(intra==255){Picture *p=find(i->frame_identity,0);if(p)p->invalid=1;}}
 void ff_voidplayer_vachunk_write_inter_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){append(i,x,y,w,h,q,skip?3:2,d);}
 void ff_voidplayer_vachunk_write_h264_mb(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t q,uint8_t intra,uint8_t im,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){append(i,x,y,(uint16_t)(i->width-x<16?i->width-x:16),(uint16_t)(i->height-y<16?i->height-y:16),q,intra?1:skip?3:2,0);}
 int ff_voidplayer_vachunk_write_frame_summary(const VoidPlayerVachunkFrameInfo *i){return 0;}

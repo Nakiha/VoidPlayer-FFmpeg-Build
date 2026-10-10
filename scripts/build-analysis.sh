@@ -28,6 +28,10 @@ old='info->frame_identity = (uintptr_t)(fc->decode_order + 1);'
 new='info->frame_identity = (uintptr_t)fc->frame->opaque;'
 assert old in s or new in s
 s=s.replace(old,new)
+old_mode='cu->intra_pred_mode_y,'
+new_mode='cu->pred_mode == MODE_PLT ? 255 : cu->intra_pred_mode_y,'
+assert old_mode in s or new_mode in s
+s=s.replace(old_mode,new_mode)
 open(p,'w').write(s)
 PY
 python3 - "$BUILD/source" <<'PYCODE'
