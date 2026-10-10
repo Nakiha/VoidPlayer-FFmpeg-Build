@@ -7,7 +7,14 @@ REV=59196ee81d09cd5312acf7d3b3896ad530d1248b
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 mkdir -p "$BUILD" "$OUT"
 if [[ ! -d "$BUILD/source/.git" ]]; then
-  git clone --no-checkout "${ANALYSIS_FFMPEG_SOURCE:-https://github.com/Nakiha/FFmpeg.git}" "$BUILD/source"
+  INPUT_SOURCE="${ANALYSIS_FFMPEG_SOURCE:-https://github.com/Nakiha/FFmpeg.git}"
+  if [[ -d "$INPUT_SOURCE/.git" || -f "$INPUT_SOURCE/.git" ]]; then
+    git clone --no-checkout "$INPUT_SOURCE" "$BUILD/source"
+  else
+    git init "$BUILD/source"
+    git -C "$BUILD/source" remote add origin "$INPUT_SOURCE"
+    git -C "$BUILD/source" fetch --depth=1 origin "$REV"
+  fi
 fi
 git -C "$BUILD/source" checkout --detach "$REV"
 cp "$ROOT/analysis/stream.c" "$BUILD/source/libavcodec/voidplayer_vachunk.c"
