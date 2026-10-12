@@ -14,11 +14,13 @@ int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal);
 int vpa_drain(void); int vpa_step(void); int vpa_count(void); int vpa_blocks(void);
 int vpa_depth(void); int vpa_ordinal(void); int vpa_width(void); int vpa_height(void); int vpa_invalid(void);
 double vpa_pts(void); int vpa_take(int maxBytes); int vpa_record_bytes(void);
+void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list);
+int vpa_reference_abi(void); int vpa_ref_count(void); int vpa_refs(void); int vpa_refs_invalid(void); int vpa_picture_type(void); int vpa_poc(void);
 #define MAX_PICTURES 32
 #define MAX_BLOCKS 131072
 #define MAX_RECORD_BYTES (32*1024*1024)
 typedef struct { uint16_t x,y,w,h; int16_t qp; uint8_t mode,depth; } Block;
-typedef struct { uintptr_t id; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; } Picture;
+typedef struct { uintptr_t id; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; uint32_t refs[128], ref_count; int refs_invalid, type, poc; } Picture;
 static Picture pictures[MAX_PICTURES];
 static AVCodecContext *decoder;
 static AVFrame *frame;
@@ -37,7 +39,7 @@ static void append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,
     if(info->width>4096||info->height>2304){failure=AVERROR(ENOMEM);return;}
     Picture *p=find(info->frame_identity,1); if(!p)return;
     if(p->sealed){failure=AVERROR_INVALIDDATA;return;}
-    p->width=info->width;p->height=info->height;
+    p->width=info->width;p->height=info->height;p->type=info->slice_type;p->poc=info->poc;
     if(!w||!h||x+w>p->width||y+h>p->height){p->invalid=1;return;}
     if(p->count>=MAX_BLOCKS){failure=AVERROR(ENOMEM);return;}
     if(p->count==p->capacity){
@@ -49,6 +51,22 @@ static void append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,
     }
     p->blocks[p->count++]=(Block){x,y,w,h,qp,mode,depth};
 }
+/* Active slice reference lists, unioned across slices. Opaque source IDs avoid
+ * POC wrap/reset ambiguity. These are candidates, not per-block MV usage. */
+void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list) {
+    if(!decoder||failure)return;
+    Picture *p=find(id,1);if(!p)return;
+    if(!ref||ref==id||ref>2000000||list<0||list>1){p->refs_invalid=1;return;}
+    for(unsigned i=0;i<p->ref_count;i++)if(p->refs[2*i]==ref-1&&p->refs[2*i+1]==list)return;
+    if(p->ref_count>=64){p->refs_invalid=1;return;}
+    p->refs[2*p->ref_count]=ref-1;p->refs[2*p->ref_count+1]=list;p->ref_count++;
+}
+int vpa_reference_abi(void){return 1;}
+int vpa_ref_count(void){return ready?ready->ref_count:0;}
+int vpa_refs(void){return ready?(int)(uintptr_t)ready->refs:0;}
+int vpa_refs_invalid(void){return !ready||ready->refs_invalid;}
+int vpa_picture_type(void){return ready?ready->type:-1;}
+int vpa_poc(void){return ready?ready->poc:0;}
 int ff_voidplayer_vachunk_is_active(void){return decoder!=NULL&&!failure;}
 void ff_voidplayer_vachunk_write_intra_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t intra,uint8_t mip,uint8_t isp,uint32_t bits){append(i,x,y,w,h,q,1,d);if(intra==255){Picture *p=find(i->frame_identity,0);if(p)p->invalid=1;}}
 void ff_voidplayer_vachunk_write_inter_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){append(i,x,y,w,h,q,skip?3:2,d);}

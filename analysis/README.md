@@ -36,3 +36,11 @@ picture, 32 MiB record storage, 8 MiB input packet, 4096x2304 coded pixels, 512 
 WASM heap. A 4 MiB stack is required by the VVC decoder. Input iteration and yielding
 are outside synchronous WASM. Hard cancellation terminates the dedicated worker.
 These are initial conservative limits, not a real-time throughput promise.
+
+Optional reference ABI 1 exports `vpa_reference_abi`, `vpa_ref_count`,
+`vpa_refs`, `vpa_refs_invalid`, `vpa_picture_type` and `vpa_poc`. Reference
+records are little-endian u32 source AU and u32 list (0/1). They union the
+active reference lists across slices, using decoder AVFrame COPY_OPAQUE IDs;
+they do not claim per-block usage. Unknown identities or >64 edges mark only
+references unsupported. Records live until take. Build manifests include the
+WASM hash in buildId and a dirty flag for unpublished local development.
