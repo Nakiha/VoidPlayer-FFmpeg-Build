@@ -48,6 +48,7 @@ for file,pairs in changes.items():
   s=s.replace(old,new)
  open(p,'w').write(s)
 PYCODE
+python3 "$ROOT/analysis/reference-patch.py" "$BUILD/source"
 mkdir -p "$BUILD/work"
 cd "$BUILD/work"
 if [[ ! -f "$BUILD/work/config.h" ]]; then
@@ -63,11 +64,11 @@ emcc -O3 -msimd128 "$ROOT/analysis/stream.c" -I "$BUILD/source" -I "$BUILD/work"
  libavcodec/libavcodec.a libavutil/libavutil.a \
  -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 \
  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=536870912 -s FILESYSTEM=0 \
- -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close"]' \
+ -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc"]' \
  -o "$OUT/voidplayer-analysis.js"
 cp "$BUILD/source/COPYING.LGPLv2.1" "$OUT/LICENSE"
 python3 - "$ROOT" "$REV" "$OUT" <<'PY'
-import json,subprocess,sys
+import json,subprocess,sys,hashlib
 root,rev,out=sys.argv[1:]
-json.dump({'schema':1,'abi':1,'semanticVersion':'0.1.0','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
+json.dump({'schema':1,'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
 PY
