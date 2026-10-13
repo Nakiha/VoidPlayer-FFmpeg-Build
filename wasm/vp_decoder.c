@@ -14,6 +14,8 @@
 
 #include <emscripten.h>
 
+#include "../shared/vp_demux.h"
+#include <libavutil/buffer.h>
 #include <stdint.h>
 #include <limits.h>
 #include <stddef.h>
@@ -54,24 +56,16 @@ _Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 // Index ABI v3 retains every video packet, original demux ordinal and seek metadata.
 // Records are PTS-sorted for transport; unknown PTS is retained at the end.
 // flags bit 0 is key; bit 1 is a demuxer-safe seek anchor.
-typedef struct VPIndexRecordV3 {
-    int64_t pts;
-    int64_t dts;
-    int64_t duration;
-    int64_t pos;
-    int32_t packet_size;
-    uint32_t flags;
-    uint64_t ordinal;
-} VPIndexRecordV3;
-_Static_assert(sizeof(VPIndexRecordV3) == 48, "index ABI v3 record size");
-_Static_assert(offsetof(VPIndexRecordV3, dts) == 8, "index ABI v3 dts offset");
-_Static_assert(offsetof(VPIndexRecordV3, duration) == 16, "index ABI v3 duration offset");
-_Static_assert(offsetof(VPIndexRecordV3, pos) == 24, "index ABI v3 position offset");
-_Static_assert(offsetof(VPIndexRecordV3, packet_size) == 32, "index ABI v3 packet size offset");
-_Static_assert(offsetof(VPIndexRecordV3, flags) == 36, "index ABI v3 flags offset");
-_Static_assert(offsetof(VPIndexRecordV3, ordinal) == 40, "index ABI v3 ordinal offset");
-
+/* Separate versioned accessor; VPFrameInfo remains 160 bytes. */
+typedef struct { int64_t pts,dts,pos; uint64_t ordinal; int32_t size,stream; uint32_t flags,abi; uint64_t hash; } VPPictureInfo;
+_Static_assert(sizeof(VPPictureInfo)==56,"picture ABI size");
 typedef struct VPContext {
+    uint8_t *identity_config;
+    VPPictureInfo picture;
+    VPH264Admission *identity_admission;
+    uint8_t *identity_seen;
+    uint64_t identity_next;
+    int identity_video_count;
     AVFormatContext *fmt;
     AVCodecContext *dec;
     AVPacket *pkt;
@@ -125,47 +119,12 @@ typedef struct VPContext {
     AVIOContext *pb;
 } VPContext;
 
-// Custom AVIO over a JS-side Blob: reads are synchronous in the hosting worker
-// (FileReaderSync), so no whole-file MEMFS copy ever exists.
-typedef struct VpBlobIO {
-    int handle;
-    int64_t size;
-    int64_t pos;
-} VpBlobIO;
-
-EM_JS(long, vp_js_read, (int handle, double offset, uint8_t *buf, int len), {
-    const entry = Module.vpBlobs.get(handle);
-    if (!entry) return -1;
-    const bytes = new Uint8Array(entry.reader.readAsArrayBuffer(entry.blob.slice(offset, offset + len)));
-    HEAPU8.set(bytes, buf);
-    return bytes.length;
-});
-
-static int vp_avio_read(void *opaque, uint8_t *buf, int size) {
-    VpBlobIO *io = (VpBlobIO *)opaque;
-    long got = vp_js_read(io->handle, (double)io->pos, buf, size);
-    if (got < 0) return AVERROR(EIO);
-    if ((!got && io->pos < io->size) || got > size || got > io->size - io->pos) return AVERROR(EIO);
-    io->pos += got;
-    return got == 0 ? AVERROR_EOF : (int)got;
-}
-
-static int64_t vp_avio_seek(void *opaque, int64_t offset, int whence) {
-    VpBlobIO *io = (VpBlobIO *)opaque;
-    if (whence == AVSEEK_SIZE) return io->size;
-    int64_t pos;
-    if ((whence & 0xFFFF) == SEEK_SET) pos = offset;
-    else if ((whence & 0xFFFF) == SEEK_CUR) pos = io->pos + offset;
-    else if ((whence & 0xFFFF) == SEEK_END) pos = io->size + offset;
-    else return AVERROR(EINVAL);
-    if (pos < 0 || pos > io->size) return AVERROR(EINVAL);
-    io->pos = pos;
-    return pos;
-}
-
 static void vp_reset_decoder_state(VPContext *ctx) {
     ctx->decode_eof = 0;
     ctx->have_frame = 0;
+    memset(&ctx->picture,0,sizeof(ctx->picture));
+    ctx->identity_next=UINT64_MAX;
+    if(ctx->identity_seen)memset(ctx->identity_seen,0,250000);
 }
 
 void vp_close_input(VPContext *ctx);
@@ -224,7 +183,11 @@ void vp_destroy(VPContext *ctx) {
 }
 
 void vp_close_input(VPContext *ctx) {
+    vp_parser_timing_guard(0);
     if (!ctx) return;
+    free(ctx->identity_config);ctx->identity_config=NULL;
+    free(ctx->identity_admission);ctx->identity_admission=NULL;
+    free(ctx->identity_seen);ctx->identity_seen=NULL;
     sws_freeContext(ctx->sws);
     ctx->sws = NULL;
     avcodec_free_context(&ctx->dec);
@@ -262,10 +225,8 @@ void vp_close_input(VPContext *ctx) {
 
 // Shared tail: stream selection, decoder open, geometry priming.
 static int vp_open_decoders(VPContext *ctx) {
-    if (avformat_find_stream_info(ctx->fmt, NULL) < 0) return VP_ERR;
-
     const AVCodec *codec = NULL;
-    ctx->stream_idx = av_find_best_stream(ctx->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
+    ctx->stream_idx = vp_select_video(ctx->fmt, &codec);
     if (ctx->stream_idx < 0 || !codec) return VP_ERR;
 
     ctx->dec = avcodec_alloc_context3(codec);
@@ -277,6 +238,14 @@ static int vp_open_decoders(VPContext *ctx) {
 #endif
     AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
     if (avcodec_parameters_to_context(ctx->dec, stream->codecpar) < 0) return VP_ERR;
+    ctx->dec->flags |= AV_CODEC_FLAG_COPY_OPAQUE;
+    ctx->identity_video_count=0;
+    for(unsigned i=0;i<ctx->fmt->nb_streams;i++)ctx->identity_video_count+=ctx->fmt->streams[i]->codecpar->codec_type==AVMEDIA_TYPE_VIDEO;
+    if(ctx->dec->codec_id==AV_CODEC_ID_H264 && ctx->identity_video_count==1 && !strcmp(ctx->fmt->iformat->name,"mpegts")) {
+        ctx->identity_admission=calloc(1,sizeof(VPH264Admission));
+        if(!ctx->identity_admission)return VP_ERR;
+        if(ctx->dec->extradata_size)vp_h264_admit(ctx->identity_admission,ctx->dec->extradata,ctx->dec->extradata_size);
+    }
     if (avcodec_open2(ctx->dec, codec, NULL) < 0) return VP_ERR;
     vp_reset_decoder_state(ctx);
     // Prime the decoder with real frames: streams like MPEG-2 in TS keep the
@@ -288,7 +257,7 @@ static int vp_open_decoders(VPContext *ctx) {
         if (ctx->frame->width > 0 && ctx->frame->height > 0) break;
     }
     if (ctx->frame->width <= 0 || ctx->frame->height <= 0) return VP_ERR;
-    av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+    vp_rewind_start(ctx->fmt, ctx->stream_idx);
     avcodec_flush_buffers(ctx->dec);
     vp_reset_decoder_state(ctx);
     return 0;
@@ -305,29 +274,7 @@ int vp_open(VPContext *ctx, const char *path) {
 int vp_open_blob(VPContext *ctx, int handle, int64_t size) {
     if (!ctx || size <= 0) return VP_ERR;
     vp_close_input(ctx);
-    VpBlobIO *io = malloc(sizeof(*io));
-    if (!io) return VP_ERR;
-    io->handle = handle;
-    io->size = size;
-    io->pos = 0;
-    const size_t buf_size = 256 * 1024;
-    uint8_t *buffer = av_malloc(buf_size);
-    if (!buffer) { free(io); return VP_ERR; }
-    AVIOContext *pb = avio_alloc_context(buffer, (int)buf_size, 0, io, vp_avio_read, NULL, vp_avio_seek);
-    if (!pb) { av_free(buffer); free(io); return VP_ERR; }
-    AVFormatContext *fmt = avformat_alloc_context();
-    if (!fmt) { avio_context_free(&pb); free(io); return VP_ERR; }
-    fmt->pb = pb;
-    fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
-    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
-        avio_context_free(&pb);
-        avformat_free_context(fmt);
-        free(io);
-        return VP_ERR;
-    }
-    ctx->io = io;
-    ctx->pb = pb;
-    ctx->fmt = fmt;
+    if (vp_blob_open(&ctx->fmt, &ctx->pb, &ctx->io, handle, size) < 0) return VP_ERR;
     return vp_open_decoders(ctx);
 }
 
@@ -414,19 +361,62 @@ static int vp_index_push(VPContext *ctx, int64_t ticks, int key, int64_t duratio
     return 0;
 }
 
+static void vp_attach_identity(VPContext *ctx) {
+    if(!ctx->identity_admission)return;
+    int admitted=vp_h264_admit(ctx->identity_admission,ctx->pkt->data,ctx->pkt->size);
+    if(!admitted || ctx->index_prefix || !ctx->index_scan_complete || !ctx->index_count ||
+        ctx->pkt->pts==AV_NOPTS_VALUE || ctx->pkt->dts==AV_NOPTS_VALUE || ctx->pkt->flags&AV_PKT_FLAG_CORRUPT)return;
+    size_t i=vp_index_lower_bound(ctx,ctx->pkt->pts);
+    if(i>=ctx->index_count || ctx->index_ticks[i]!=ctx->pkt->pts ||
+        (i+1<ctx->index_count && ctx->index_ticks[i+1]==ctx->pkt->pts) ||
+        ctx->index_dts[i]!=ctx->pkt->dts || ctx->index_pos[i]!=ctx->pkt->pos || ctx->index_packet_size[i]!=ctx->pkt->size)return;
+    uint64_t au=ctx->index_order[i];
+    if(au>=2000000 || (ctx->identity_next!=UINT64_MAX && au!=ctx->identity_next)){ctx->identity_next=UINT64_MAX;return;}
+    ctx->identity_next=au+1;
+    AVBufferRef *buffer=av_buffer_alloc(sizeof(VPPictureInfo));if(!buffer)return;
+    VPPictureInfo id={ctx->pkt->pts,ctx->pkt->dts,ctx->pkt->pos,au,ctx->pkt->size,ctx->stream_idx,1,1,vp_packet_hash(ctx->pkt->data,ctx->pkt->size)};
+    memcpy(buffer->data,&id,sizeof(id));av_buffer_unref(&ctx->pkt->opaque_ref);ctx->pkt->opaque_ref=buffer;
+}
+static void vp_receive_identity(VPContext *ctx) {
+    memset(&ctx->picture,0,sizeof(ctx->picture));
+    if(!ctx->identity_admission || !ctx->frame->opaque_ref || ctx->frame->opaque_ref->size!=sizeof(VPPictureInfo) ||
+        ctx->frame->decode_error_flags || ctx->frame->flags&(AV_FRAME_FLAG_CORRUPT|AV_FRAME_FLAG_INTERLACED))return;
+    VPPictureInfo id;memcpy(&id,ctx->frame->opaque_ref->data,sizeof(id));
+    if(id.abi!=1 || id.ordinal>=2000000 || ctx->frame->pts!=id.pts || (ctx->identity_admission->changed || ctx->identity_admission->unsupported))return;
+    if(!ctx->identity_seen)ctx->identity_seen=calloc(250000,1);
+    if(!ctx->identity_seen || (ctx->identity_seen[id.ordinal>>3]&(1u<<(id.ordinal&7))))return;
+    ctx->identity_seen[id.ordinal>>3]|=1u<<(id.ordinal&7);ctx->picture=id;
+}
+int vp_picture_abi_version(void) { return 1; }
+const VPPictureInfo *vp_picture_info(VPContext *ctx) { return ctx && ctx->have_frame && ctx->picture.flags ? &ctx->picture : NULL; }
+int vp_identity_config_bytes(VPContext *ctx) {
+    VPH264Admission *s=ctx?ctx->identity_admission:NULL;
+    return s && !s->changed && !s->unsupported && s->sps_size && s->pps_size ? 8+s->sps_size+s->pps_size : 0;
+}
+const uint8_t *vp_identity_config(VPContext *ctx) {
+    int n=vp_identity_config_bytes(ctx);if(!n)return NULL;
+    if(!ctx->identity_config)ctx->identity_config=malloc(8200);
+    if(!ctx->identity_config)return NULL;
+    VPH264Admission *s=ctx->identity_admission;const uint8_t prefix[]={0,0,0,1};
+    memcpy(ctx->identity_config,prefix,4);memcpy(ctx->identity_config+4,s->sps,s->sps_size);
+    memcpy(ctx->identity_config+4+s->sps_size,prefix,4);memcpy(ctx->identity_config+8+s->sps_size,s->pps,s->pps_size);
+    return ctx->identity_config;
+}
+
+
 // Decodes until one output frame is produced, EOF, or error. Returns
 // VP_OK with ctx->frame filled, VP_EOF when drained, VP_ERR on failure.
 static int vp_decode_one(VPContext *ctx) {
     while (!ctx->decode_eof) {
         int ret = avcodec_receive_frame(ctx->dec, ctx->frame);
-        if (ret == 0) return VP_OK;
+        if (ret == 0) { vp_receive_identity(ctx); return VP_OK; }
         if (ret == AVERROR_EOF) {
             ctx->decode_eof = 1;
             return VP_EOF;
         }
         if (ret != AVERROR(EAGAIN)) return VP_ERR;
 
-        ret = av_read_frame(ctx->fmt, ctx->pkt);
+        ret = vp_demux_read_frame(ctx->fmt, ctx->pkt);
         if (ret == AVERROR_EOF) {
             avcodec_send_packet(ctx->dec, NULL);
             continue;
@@ -444,6 +434,7 @@ static int vp_decode_one(VPContext *ctx) {
             avcodec_send_packet(ctx->dec, NULL);
             continue;
         }
+        vp_attach_identity(ctx);
         ret = avcodec_send_packet(ctx->dec, ctx->pkt);
         av_packet_unref(ctx->pkt);
         if (ret < 0 && ret != AVERROR(EAGAIN)) return VP_ERR;
@@ -605,7 +596,7 @@ static int vp_index_scan_finish(VPContext *ctx) {
         ctx->index_scan_active = 0;
         return VP_ERR;
     }
-    if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) {
+    if (vp_rewind_start(ctx->fmt, ctx->stream_idx) < 0) {
         ctx->index_scan_error = 1;
         ctx->index_scan_active = 0;
         return VP_ERR;
@@ -672,7 +663,7 @@ int vp_index_apply_prefix(VPContext *ctx, int64_t truncated_at, int64_t end_dts)
 static int vp_index_scan_begin_internal(VPContext *ctx, int progressive) {
     if (!ctx || !ctx->fmt || !ctx->dec || ctx->stream_idx < 0 ||
         ctx->index_scan_started || ctx->index_import_streaming || ctx->index_count != 0) return VP_ERR;
-    if (av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD) < 0) return VP_ERR;
+    if (vp_rewind_start(ctx->fmt, ctx->stream_idx) < 0) return VP_ERR;
     ctx->index_count = 0;
     ctx->index_stable_count = 0;
     ctx->index_next_order = 0;
@@ -707,7 +698,7 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
     if (!ctx || !ctx->index_scan_active || packet_budget <= 0) return VP_ERR;
     int processed = 0;
     while (processed < packet_budget) {
-        int ret = av_read_frame(ctx->fmt, ctx->pkt);
+        int ret = vp_demux_read_frame(ctx->fmt, ctx->pkt);
         if (ret == AVERROR_EOF) {
             if (vp_index_scan_finish(ctx) < 0) return VP_ERR;
             return processed;
@@ -729,6 +720,7 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
         if (packet_end > ctx->index_scan_bytes) ctx->index_scan_bytes = packet_end;
         if (ctx->io && ctx->io->pos > ctx->index_scan_bytes) ctx->index_scan_bytes = ctx->io->pos;
         if (ctx->pkt->stream_index == ctx->stream_idx) {
+            if(ctx->identity_admission)vp_h264_admit(ctx->identity_admission,ctx->pkt->data,ctx->pkt->size);
             if (ctx->pkt->flags & AV_PKT_FLAG_CORRUPT) {
                 av_packet_unref(ctx->pkt);
                 if (vp_index_finish_prefix(ctx) == VP_OK) return processed;
@@ -1146,10 +1138,10 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
         if (seek) {
             // Seek-by-byte-estimation demuxers (e.g. MPEG-TS) can land past
             // the target; on overshoot restart once from the beginning.
-            if (av_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : seek_ticks,
+            if (vp_demux_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : seek_ticks,
                               AVSEEK_FLAG_BACKWARD) < 0) {
                 ctx->extract_restarts++;
-                av_seek_frame(ctx->fmt, ctx->stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+                vp_rewind_start(ctx->fmt, ctx->stream_idx);
             }
             avcodec_flush_buffers(ctx->dec);
             vp_reset_decoder_state(ctx);
@@ -1196,6 +1188,7 @@ int vp_prime_first_presentable(VPContext *ctx) {
     }
 }
 
+int vp_frame_interlaced(VPContext *ctx) { return ctx && ctx->have_frame ? !!(ctx->frame->flags&AV_FRAME_FLAG_INTERLACED) : -1; }
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
 uint8_t *vp_pixels(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->pixels : NULL; }
 const VPFrameInfo *vp_frame_info(VPContext *ctx) { return ctx && ctx->have_frame ? &ctx->output : NULL; }
@@ -1214,6 +1207,9 @@ int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int s
     if (!codec) return VP_ERR;
     ctx->dec = avcodec_alloc_context3(codec);
     if (!ctx->dec) return VP_ERR;
+    /* Preserve coded-space crop offsets for the frame ABI. Libavcodec's
+     * aligned automatic crop can discard the origin and leave extra pixels. */
+    ctx->dec->apply_cropping = 0;
     ctx->dec->pkt_timebase = (AVRational){1, 1000000};
     ctx->dec->strict_std_compliance = FF_COMPLIANCE_STRICT;
     ctx->dec->thread_count = 1;

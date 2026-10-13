@@ -2,7 +2,7 @@
   "name": "voidplayer-wasm",
   "target": "wasm32-emscripten",
   "toolchain": "emscripten",
-  "ffmpegRef": "n9.0.1",
+  "ffmpegRef": "n9.0.2",
   "libraries": [
     "avcodec",
     "avformat",

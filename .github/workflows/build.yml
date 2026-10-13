@@ -109,7 +109,7 @@ jobs:
     name: WASM decoder core
     runs-on: ubuntu-24.04
     env:
-      FFMPEG_REF: ${{ github.event.inputs.ffmpeg_ref || 'n9.0.1' }}
+      FFMPEG_REF: ${{ github.event.inputs.ffmpeg_ref || 'n9.0.2' }}
 
     steps:
       - name: Checkout

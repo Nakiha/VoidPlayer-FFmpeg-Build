@@ -8,8 +8,8 @@ set -euo pipefail
 # WebCodecs lacks (FFV1, MPEG-1/2, MPEG-4 ASP, MJPEG, ProRes, H.266/VVC).
 # ---------------------------------------------------------------------------
 
-FFMPEG_REF="n9.0.1"
-FFMPEG_REMOTE="https://github.com/Nakiha/FFmpeg.git"
+FFMPEG_REF="n9.0.2"
+FFMPEG_REMOTE="https://github.com/FFmpeg/FFmpeg.git"
 BUILD_ROOT=""
 DIST_ROOT=""
 CLEAN=false
@@ -27,8 +27,8 @@ while [[ $# -gt 0 ]]; do
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
-            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: n9.0.1)"
-            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: Nakiha/FFmpeg fork)"
+            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: n9.0.2)"
+            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: FFmpeg/FFmpeg upstream)"
             echo "  --build-root PATH    Build directory    (default: .build)"
             echo "  --dist-root PATH     Output directory   (default: dist)"
             echo "  --clean              Wipe build directory before starting"
@@ -88,6 +88,14 @@ if [ ! -d "$FFMPEG_SOURCE" ]; then
     step git clone --depth 1 --branch "$FFMPEG_REF" "$FFMPEG_REMOTE" "$FFMPEG_SOURCE"
 fi
 
+# Never label a cached source checkout as a different requested revision.
+if ! EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse --verify "$FFMPEG_REF^{commit}" 2>/dev/null)"; then
+    step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$FFMPEG_REF"
+    EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse "FETCH_HEAD^{commit}")"
+fi
+[ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD)" = "$EXPECTED_REV" ] || die "Cached FFmpeg source differs from $FFMPEG_REF; use a fresh --build-root"
+[ -z "$(git -C "$FFMPEG_SOURCE" status --porcelain --untracked-files=no)" ] || die "FFmpeg source has tracked modifications"
+
 # ---------------------------------------------------------------------------
 # Configure FFmpeg (trimmed to the fallback decode path)
 # ---------------------------------------------------------------------------
@@ -107,7 +115,19 @@ if [ "$WASM_SIMD" = "1" ]; then
 fi
 if $MT; then
     SIMD_ARGS=("--extra-cflags=-msimd128 -pthread -DVP_MT" "--extra-ldflags=-msimd128 -pthread")
-    SIMD_CFLAGS="-msimd128 -pthread -DVP_MT"
+    SIMD_CFLAGS="$SIMD_CFLAGS -pthread -DVP_MT"
+fi
+
+WASM_OPT_LEVEL="${WASM_OPT_LEVEL:-3}"
+WASM_LINK_OPT_LEVEL="${WASM_LINK_OPT_LEVEL:-2}"
+WASM_LTO="${WASM_LTO:-0}"
+[[ "$WASM_OPT_LEVEL" =~ ^(2|3|s|z)$ && "$WASM_LINK_OPT_LEVEL" =~ ^(2|3|s|z)$ ]] || die "Invalid optimization level"
+[[ "$WASM_LTO" =~ ^(0|1)$ ]] || die "Invalid WASM_LTO"
+if [ "$WASM_LTO" = 1 ]; then SIMD_CFLAGS="$SIMD_CFLAGS -flto"; fi
+SIMD_ARGS=("--extra-cflags=$SIMD_CFLAGS" "--extra-ldflags=$SIMD_CFLAGS" "--optflags=-O$WASM_OPT_LEVEL")
+SIGNATURE="$EXPECTED_REV:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
+if [ -f "$FFMPEG_BUILD/config.h" ] && [ "$(cat "$FFMPEG_BUILD/.build-signature" 2>/dev/null || true)" != "$SIGNATURE" ]; then
+    die "Build inputs changed; use a fresh --build-root"
 fi
 
 # dav1d supplies software AV1 for packet-fed FLV on browsers without AV1.
@@ -166,7 +186,10 @@ for decoder in $DECODERS; do FFMPEG_ARGS+=("--enable-decoder=$decoder"); done
 for parser in $PARSERS; do FFMPEG_ARGS+=("--enable-parser=$parser"); done
 
 cd "$FFMPEG_BUILD"
-step emconfigure "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
+if [ ! -f config.h ]; then
+    step emconfigure "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
+    printf '%s\n' "$SIGNATURE" > .build-signature
+fi
 
 NPROC="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)"
 step emmake make -j"$NPROC"
@@ -180,6 +203,8 @@ cd - > /dev/null
 mkdir -p "$PACKAGE_ROOT"
 
 # Core build identity is generated from the checked-out source commit by build-wasm.sh.
+[[ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD:libavformat)" == 740392267b71cb9f0e6bd3b5b52173777b0d0939 ]] || die "Demux compatibility tree mismatch"
+[[ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD:libavcodec/parser.c)" == cf5d65ee1699eb6a81f4da8df41edc6a503c5241 ]] || { echo 'Parser timing descriptor source mismatch' >&2; exit 1; }
 CORE_BUILD_ID="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 CORE_BUILD_ID_HEADER="$BUILD_ROOT/vp_core_build_id.h"
 printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_BUILD_ID" > "$CORE_BUILD_ID_HEADER"
@@ -190,7 +215,7 @@ if $MT; then
     MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
 fi
 
-step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
+step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_packet_demux.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
     -include "$CORE_BUILD_ID_HEADER" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
@@ -202,9 +227,24 @@ step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_frame_interlaced,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vpd_live_contexts,_vpd_build_id,_vpd_abi,_vpd_compat_id,_vpd_open,_vpd_close,_vpd_stream,_vpd_video_count,_vpd_codec,_vpd_format,_vpd_extra_size,_vpd_extra,_vpd_tb_num,_vpd_tb_den,_vpd_bytes,_vpd_packets,_vpd_release,_vpd_packet,_vpd_bind_index,_vpd_read,_vpd_seek \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
+
+# Emscripten 6 resolves the pthread entry by basename, dropping the content
+# version query on import.meta.url. Reuse the exact importing glue URL so an
+# older cached main Worker cannot accidentally launch newer pthread glue.
+if $MT; then
+    python3 - "$PACKAGE_ROOT/voidplayer-core-mt.js" <<'PYTHON'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+old = 'new URL("voidplayer-core-mt.js",import.meta.url)'
+if s.count(old) != 1:
+    raise SystemExit('Emscripten pthread URL changed; review version preservation')
+p.write_text(s.replace(old, 'new URL(import.meta.url)'))
+PYTHON
+fi
 
 # ---------------------------------------------------------------------------
 # Licenses, manifest, archive
@@ -226,14 +266,19 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
 {
   "package": "$PACKAGE_NAME",
   "target": "wasm32-emscripten",
+  "demuxAbi": 1,
+  "pictureAbi": 1,
+  "demuxCompatibility": "ffmpeg-9.0.2-avformat-740392267b71-ts-raw-input-v2",
   "ffmpegRef": "$FFMPEG_REF",
   "ffmpegRemote": "$FFMPEG_REMOTE",
+  "ffmpegRevision": "$EXPECTED_REV",
+  "optimization": {"compile": "$WASM_OPT_LEVEL", "link": "$WASM_LINK_OPT_LEVEL", "lto": "$WASM_LTO", "simd": "$WASM_SIMD"},
   "builtAtUtc": "$BUILT_AT",
   "libraries": ["avcodec", "avformat", "avutil", "swscale"],
   "demuxers": "$(echo $DEMUXERS)",
   "decoders": "$(echo $DECODERS)",
   "audio": "not included",
-  "threading": "single-threaded, no SharedArrayBuffer requirement"
+  "threading": "$(if $MT; then echo pthreads; else echo single; fi)"
 }
 EOF
 

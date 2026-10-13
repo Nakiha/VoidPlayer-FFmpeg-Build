@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${ANALYSIS_BUILD_ROOT:-$ROOT/.build/analysis}"
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
-REV=59196ee81d09cd5312acf7d3b3896ad530d1248b
+REV=c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 mkdir -p "$BUILD" "$OUT"
 if [[ ! -d "$BUILD/source/.git" ]]; then
@@ -17,58 +17,42 @@ if [[ ! -d "$BUILD/source/.git" ]]; then
   fi
 fi
 git -C "$BUILD/source" checkout --detach "$REV"
+[[ "$(git -C "$BUILD/source" rev-parse HEAD:libavformat)" == 740392267b71cb9f0e6bd3b5b52173777b0d0939 ]] || { echo 'Demux compatibility tree mismatch' >&2; exit 1; }
+[[ "$(git -C "$BUILD/source" rev-parse HEAD:libavcodec/parser.c)" == cf5d65ee1699eb6a81f4da8df41edc6a503c5241 ]] || { echo 'Parser timing descriptor source mismatch' >&2; exit 1; }
 cp "$ROOT/analysis/stream.c" "$BUILD/source/libavcodec/voidplayer_vachunk.c"
-# The old VVC hook used a range-local decode_order. Bind to the source packet's
-# COPY_OPAQUE metadata instead; fail build if the pinned hunk no longer matches.
-python3 - "$BUILD/source/libavcodec/vvc/ctu.c" <<'PY'
-import sys
-p=sys.argv[1]
-s=open(p).read()
-old='info->frame_identity = (uintptr_t)(fc->decode_order + 1);'
-new='info->frame_identity = (uintptr_t)fc->frame->opaque;'
-assert old in s or new in s
-s=s.replace(old,new)
-old_mode='cu->intra_pred_mode_y,'
-new_mode='cu->pred_mode == MODE_PLT ? 255 : cu->intra_pred_mode_y,'
-assert old_mode in s or new_mode in s
-if new_mode not in s:s=s.replace(old_mode,new_mode)
-open(p,'w').write(s)
-PY
-python3 - "$BUILD/source" <<'PYCODE'
-import sys
-root=sys.argv[1]
-changes={
- 'libavcodec/h264_mb.c': [('h->avctx->width > 0 ? h->avctx->width : h->width','h->mb_width * 16'),('h->avctx->height > 0 ? h->avctx->height : h->height','h->mb_height * 16')],
- 'libavcodec/hevc/hevcdec.c': [('s->avctx->width > 0 ? s->avctx->width : sps->width','sps->width'),('s->avctx->height > 0 ? s->avctx->height : sps->height','sps->height')]
-}
-for file,pairs in changes.items():
- p=root+'/'+file;s=open(p).read()
- for old,new in pairs:
-  assert old in s or new in s
-  s=s.replace(old,new)
- open(p,'w').write(s)
-PYCODE
-python3 "$ROOT/analysis/reference-patch.py" "$BUILD/source"
 mkdir -p "$BUILD/work"
 cd "$BUILD/work"
-if [[ ! -f "$BUILD/work/config.h" ]]; then
+OPT="${ANALYSIS_OPT_LEVEL:-3}"
+LTO="${ANALYSIS_LTO:-0}"
+[[ "$OPT" =~ ^(2|3|s|z)$ ]] || { echo 'Invalid ANALYSIS_OPT_LEVEL'; exit 1; }
+[[ "$LTO" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_LTO'; exit 1; }
+CFLAGS="-msimd128"
+if [[ "$LTO" == 1 ]]; then CFLAGS="$CFLAGS -flto"; fi
+SIGNATURE="$REV:demux-ts-v2:$OPT:$LTO:$(emcc --version | head -1)"
+if [[ -f config.h && "$(cat .analysis-build-signature 2>/dev/null || true)" != "$SIGNATURE" ]]; then
+  echo 'Analysis build inputs changed; select a fresh ANALYSIS_BUILD_ROOT.' >&2; exit 1
+fi
+if [[ ! -f config.h ]]; then
 emconfigure "$BUILD/source/configure" --cc=emcc --cxx=em++ --ar=emar --ranlib=emranlib --nm=emnm \
  --target-os=none --arch=x86_32 --cpu=generic --enable-cross-compile --disable-asm --disable-stripping \
  --disable-programs --disable-doc --disable-debug --disable-avdevice --disable-avfilter --disable-swresample \
- --disable-swscale --disable-avformat --disable-network --disable-everything --disable-autodetect \
- --disable-pthreads --disable-w32threads --disable-os2threads --enable-avcodec --enable-avutil \
- --enable-decoder=h264,hevc,vvc --enable-parser=h264,hevc,vvc --extra-cflags=-msimd128
+ --disable-swscale --enable-avformat --disable-network --disable-everything --disable-autodetect \
+ --disable-pthreads --disable-w32threads --disable-os2threads --enable-avcodec --enable-avutil --enable-demuxer=mpegts \
+ --enable-decoder=h264,hevc,vvc --enable-parser=h264,hevc,vvc --optflags="-O$OPT" --extra-cflags="$CFLAGS"
+printf '%s\n' "$SIGNATURE" > .analysis-build-signature
 fi
 make -j "${ANALYSIS_BUILD_JOBS:-4}"
-emcc -O3 -msimd128 "$ROOT/analysis/stream.c" -I "$BUILD/source" -I "$BUILD/work" \
- libavcodec/libavcodec.a libavutil/libavutil.a \
+CORE_REV="$(git -C "$ROOT" rev-parse HEAD)"
+printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_REV" > "$BUILD/vp_core_build_id.h"
+emcc "-O$OPT" $CFLAGS -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/stream.c" "$ROOT/shared/vp_demux.c" "$ROOT/shared/vp_packet_demux.c" "$ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 -I "$BUILD/source" -I "$BUILD/work" \
+ libavformat/libavformat.a libavcodec/libavcodec.a libavutil/libavutil.a \
  -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 \
  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=536870912 -s FILESYSTEM=0 \
- -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc"]' \
+ -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vpd_live_contexts","_vpd_build_id","_vpd_abi","_vpd_compat_id","_vpd_open","_vpd_close","_vpd_stream","_vpd_video_count","_vpd_codec","_vpd_format","_vpd_extra_size","_vpd_extra","_vpd_tb_num","_vpd_tb_den","_vpd_bytes","_vpd_packets","_vpd_release","_vpd_packet","_vpd_bind_index","_vpd_read","_vpd_seek"]' \
  -o "$OUT/voidplayer-analysis.js"
 cp "$BUILD/source/COPYING.LGPLv2.1" "$OUT/LICENSE"
-python3 - "$ROOT" "$REV" "$OUT" <<'PY'
+python3 - "$ROOT" "$REV" "$OUT" "$OPT" "$LTO" <<'PY'
 import json,subprocess,sys,hashlib
-root,rev,out=sys.argv[1:]
-json.dump({'schema':1,'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
+root,rev,out,opt,lto=sys.argv[1:]
+json.dump({'schema':1,'optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True},'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','demuxAbi':1,'demuxCompatibility':'ffmpeg-9.0.2-avformat-740392267b71-ts-raw-input-v2','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
 PY
