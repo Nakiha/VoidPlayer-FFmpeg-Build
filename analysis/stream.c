@@ -1,6 +1,7 @@
 /* LGPL-2.1-or-later. Streaming collector for the pinned instrumented FFmpeg.
  * One context per WASM instance. Records seal only on avcodec_receive_frame;
  * decoder reference frames remain owned by FFmpeg after records are taken. */
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #include "libavutil/mem.h"
 int vpa_abi(void); void vpa_close(void); int vpa_open(int codec,const uint8_t *extra,int size);
 int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal);
+int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known,int ordinal);
 int vpa_drain(void); int vpa_step(void); int vpa_count(void); int vpa_blocks(void);
 int vpa_depth(void); int vpa_ordinal(void); int vpa_width(void); int vpa_height(void); int vpa_invalid(void);
 double vpa_pts(void); int vpa_take(int maxBytes); int vpa_record_bytes(void);
@@ -90,14 +92,15 @@ int vpa_open(int codec,const uint8_t *extra,int size){
 }
 /* At most one bounded packet per step. JS owns independent packet iteration,
  * random access planning, cancellation checks and result backpressure. */
-int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal){
+int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known,int ordinal){
     if(!decoder||ready||failure)return failure?failure:2;
-    if(size<1||size>8*1024*1024||ordinal<0||ordinal>=2000000)return AVERROR(EINVAL);
+    if((known&~3)||((known&1)&&(!isfinite(pts)||pts < -9007199254740991.0||pts > 9007199254740991.0))||((known&2)&&(!isfinite(dts)||dts < -9007199254740991.0||dts > 9007199254740991.0))||size<1||size>8*1024*1024||ordinal<0||ordinal>=2000000)return AVERROR(EINVAL);
     AVPacket *p=av_packet_alloc();if(!p)return AVERROR(ENOMEM);
     int ret=av_new_packet(p,size);if(ret<0){av_packet_free(&p);return ret;}
-    memcpy(p->data,bytes,size);p->pts=(int64_t)pts;p->dts=(int64_t)dts;p->opaque=(void*)(uintptr_t)(ordinal+1);
+    memcpy(p->data,bytes,size);p->pts=(known&1)?(int64_t)pts:AV_NOPTS_VALUE;p->dts=(known&2)?(int64_t)dts:AV_NOPTS_VALUE;p->opaque=(void*)(uintptr_t)(ordinal+1);
     ret=avcodec_send_packet(decoder,p);av_packet_free(&p);return failure?failure:ret==AVERROR(EAGAIN)?2:ret;
 }
+int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal){return vpa_feed_known(bytes,size,pts,dts,3,ordinal);}
 int vpa_drain(void){if(!decoder)return AVERROR(EINVAL);int ret=avcodec_send_packet(decoder,NULL);return ret==AVERROR(EAGAIN)?2:ret;}
 static int compare(const void *a,const void *b){const Block *x=a,*y=b;return x->y!=y->y?(int)x->y-y->y:(int)x->x-y->x;}
 /* Successful decoder output is picture-complete for the single-thread build.

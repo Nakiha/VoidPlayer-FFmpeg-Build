@@ -203,6 +203,7 @@ cd - > /dev/null
 mkdir -p "$PACKAGE_ROOT"
 
 # Core build identity is generated from the checked-out source commit by build-wasm.sh.
+[[ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD:libavformat)" == 740392267b71cb9f0e6bd3b5b52173777b0d0939 ]] || die "Demux compatibility tree mismatch"
 CORE_BUILD_ID="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 CORE_BUILD_ID_HEADER="$BUILD_ROOT/vp_core_build_id.h"
 printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_BUILD_ID" > "$CORE_BUILD_ID_HEADER"
@@ -213,7 +214,7 @@ if $MT; then
     MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
 fi
 
-step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
+step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_packet_demux.c" \
     -include "$CORE_BUILD_ID_HEADER" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
@@ -225,7 +226,7 @@ step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vpd_build_id,_vpd_abi,_vpd_compat_id,_vpd_open,_vpd_close,_vpd_stream,_vpd_video_count,_vpd_codec,_vpd_format,_vpd_extra_size,_vpd_extra,_vpd_tb_num,_vpd_tb_den,_vpd_bytes,_vpd_packets,_vpd_release,_vpd_packet,_vpd_bind_index,_vpd_read,_vpd_seek \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
@@ -264,6 +265,9 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
 {
   "package": "$PACKAGE_NAME",
   "target": "wasm32-emscripten",
+  "demuxAbi": 1,
+  "pictureAbi": 1,
+  "demuxCompatibility": "ffmpeg-9.0.2-avformat-740392267b71-ts-nofill-v1",
   "ffmpegRef": "$FFMPEG_REF",
   "ffmpegRemote": "$FFMPEG_REMOTE",
   "ffmpegRevision": "$EXPECTED_REV",
