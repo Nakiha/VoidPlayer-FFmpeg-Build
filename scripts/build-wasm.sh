@@ -8,8 +8,8 @@ set -euo pipefail
 # WebCodecs lacks (FFV1, MPEG-1/2, MPEG-4 ASP, MJPEG, ProRes, H.266/VVC).
 # ---------------------------------------------------------------------------
 
-FFMPEG_REF="n9.0.1"
-FFMPEG_REMOTE="https://github.com/Nakiha/FFmpeg.git"
+FFMPEG_REF="n9.0.2"
+FFMPEG_REMOTE="https://github.com/FFmpeg/FFmpeg.git"
 BUILD_ROOT=""
 DIST_ROOT=""
 CLEAN=false
@@ -27,8 +27,8 @@ while [[ $# -gt 0 ]]; do
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
-            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: n9.0.1)"
-            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: Nakiha/FFmpeg fork)"
+            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: n9.0.2)"
+            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: FFmpeg/FFmpeg upstream)"
             echo "  --build-root PATH    Build directory    (default: .build)"
             echo "  --dist-root PATH     Output directory   (default: dist)"
             echo "  --clean              Wipe build directory before starting"
@@ -88,6 +88,14 @@ if [ ! -d "$FFMPEG_SOURCE" ]; then
     step git clone --depth 1 --branch "$FFMPEG_REF" "$FFMPEG_REMOTE" "$FFMPEG_SOURCE"
 fi
 
+# Never label a cached source checkout as a different requested revision.
+if ! EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse --verify "$FFMPEG_REF^{commit}" 2>/dev/null)"; then
+    step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$FFMPEG_REF"
+    EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse FETCH_HEAD)"
+fi
+[ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD)" = "$EXPECTED_REV" ] || die "Cached FFmpeg source differs from $FFMPEG_REF; use a fresh --build-root"
+[ -z "$(git -C "$FFMPEG_SOURCE" status --porcelain --untracked-files=no)" ] || die "FFmpeg source has tracked modifications"
+
 # ---------------------------------------------------------------------------
 # Configure FFmpeg (trimmed to the fallback decode path)
 # ---------------------------------------------------------------------------
@@ -107,7 +115,19 @@ if [ "$WASM_SIMD" = "1" ]; then
 fi
 if $MT; then
     SIMD_ARGS=("--extra-cflags=-msimd128 -pthread -DVP_MT" "--extra-ldflags=-msimd128 -pthread")
-    SIMD_CFLAGS="-msimd128 -pthread -DVP_MT"
+    SIMD_CFLAGS="$SIMD_CFLAGS -pthread -DVP_MT"
+fi
+
+WASM_OPT_LEVEL="${WASM_OPT_LEVEL:-3}"
+WASM_LINK_OPT_LEVEL="${WASM_LINK_OPT_LEVEL:-2}"
+WASM_LTO="${WASM_LTO:-0}"
+[[ "$WASM_OPT_LEVEL" =~ ^(2|3|s|z)$ && "$WASM_LINK_OPT_LEVEL" =~ ^(2|3|s|z)$ ]] || die "Invalid optimization level"
+[[ "$WASM_LTO" =~ ^(0|1)$ ]] || die "Invalid WASM_LTO"
+if [ "$WASM_LTO" = 1 ]; then SIMD_CFLAGS="$SIMD_CFLAGS -flto"; fi
+SIMD_ARGS=("--extra-cflags=$SIMD_CFLAGS" "--extra-ldflags=$SIMD_CFLAGS" "--optflags=-O$WASM_OPT_LEVEL")
+SIGNATURE="$EXPECTED_REV:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
+if [ -f "$FFMPEG_BUILD/config.h" ] && [ "$(cat "$FFMPEG_BUILD/.build-signature" 2>/dev/null || true)" != "$SIGNATURE" ]; then
+    die "Build inputs changed; use a fresh --build-root"
 fi
 
 # dav1d supplies software AV1 for packet-fed FLV on browsers without AV1.
@@ -166,7 +186,10 @@ for decoder in $DECODERS; do FFMPEG_ARGS+=("--enable-decoder=$decoder"); done
 for parser in $PARSERS; do FFMPEG_ARGS+=("--enable-parser=$parser"); done
 
 cd "$FFMPEG_BUILD"
-step emconfigure "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
+if [ ! -f config.h ]; then
+    step emconfigure "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
+    printf '%s\n' "$SIGNATURE" > .build-signature
+fi
 
 NPROC="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)"
 step emmake make -j"$NPROC"
@@ -190,7 +213,7 @@ if $MT; then
     MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
 fi
 
-step emcc -O2 ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
+step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" \
     -include "$CORE_BUILD_ID_HEADER" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
@@ -228,12 +251,14 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
   "target": "wasm32-emscripten",
   "ffmpegRef": "$FFMPEG_REF",
   "ffmpegRemote": "$FFMPEG_REMOTE",
+  "ffmpegRevision": "$EXPECTED_REV",
+  "optimization": {"compile": "$WASM_OPT_LEVEL", "link": "$WASM_LINK_OPT_LEVEL", "lto": "$WASM_LTO", "simd": "$WASM_SIMD"},
   "builtAtUtc": "$BUILT_AT",
   "libraries": ["avcodec", "avformat", "avutil", "swscale"],
   "demuxers": "$(echo $DEMUXERS)",
   "decoders": "$(echo $DECODERS)",
   "audio": "not included",
-  "threading": "single-threaded, no SharedArrayBuffer requirement"
+  "threading": "$(if $MT; then echo pthreads; else echo single; fi)"
 }
 EOF
 

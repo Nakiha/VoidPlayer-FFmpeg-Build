@@ -60,7 +60,7 @@ VoidPlayer does not ship:
 the browser prototype's fallback decode path — containers and codecs the
 browser cannot handle through mediabunny/WebCodecs (FFV1, MPEG-1/2, MPEG-4 ASP,
 MJPEG, ProRes, and H.266/VVC, which requires FFmpeg ≥ 7.1; this build uses
-`n9.0.1` from the `Nakiha/FFmpeg` fork). H.264, HEVC, VP8 and VP9 are also
+`n9.0.2` from `FFmpeg/FFmpeg`). H.264, HEVC, VP8 and VP9 are also
 included: browsers support those codecs only in specific profiles, so gaps like
 H.264 High 4:2:2 or HEVC 4:2:2/10-bit need the fallback too.
 
@@ -75,10 +75,10 @@ Prerequisites: an Emscripten SDK with `emcc` on `PATH`, or a checkout under
 `.toolchains/emsdk` (`./emsdk install latest && ./emsdk activate latest`).
 
 ```bash
-bash scripts/build-wasm.sh                # n9.0.1 from the Nakiha/FFmpeg fork
+bash scripts/build-wasm.sh                # n9.0.2 from upstream FFmpeg
 bash scripts/build-wasm.sh --mt           # multi-threaded variant (pthreads)
 bash scripts/build-wasm.sh --ffmpeg-ref n8.1
-node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.1 [sample ...]
+node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 [sample ...]
 ```
 
 The `--mt` variant (`voidplayer-core-mt.*`) uses Emscripten pthreads and needs
@@ -272,4 +272,27 @@ pixel bytes, including raw YUV planes.
 
 One demux scan records every selected video packet, including packets without PTS. Exported records retain the original packet ordinal at byte 40; records with PTS are presentation-sorted, and missing-PTS records follow them. Playback consumes the timestamped view; analysis retains packet identities and bytes across sorting and cache import. Stream ABI v2 watermarks describe the last known PTS, including batches containing only untimed packets. `vp_index_scan_decoded_packets` is zero for demux-only scans; decoder-backed prefix scanning remains an explicit diagnostic mode. Old ABI v2 caches must be rebuilt.
 
-HDR resources tagged BT.2020 NCL with PQ/HLG and at least 10-bit depth retain original integer YUV samples in frame ABI v2. The core performs no HDR tone mapping; the web presenter owns the display transform. `node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.1/voidplayer-core.js` checks PQ/HLG metadata, exact samples against independent FFmpeg, and seeking; run again with the multithreaded glue.
+HDR resources tagged BT.2020 NCL with PQ/HLG and at least 10-bit depth retain original integer YUV samples in frame ABI v2. The core performs no HDR tone mapping; the web presenter owns the display transform. `node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js` checks PQ/HLG metadata, exact samples against independent FFmpeg, and seeking; run again with the multithreaded glue.
+
+### WASM refresh and optimization experiments
+
+Playback/index uses upstream FFmpeg n9.0.2; analysis uses a separate pinned
+n9.0.2 fork with bounded H.264/HEVC/VVC hooks. Analysis remains single threaded
+because completed-picture sealing relies on decoder callback order. The hooks,
+reference union, coded geometry and stable VVC picture identity are in the fork
+commit rather than text substitutions against an older FFmpeg release.
+
+`WASM_OPT_LEVEL` (default `3`), `WASM_LINK_OPT_LEVEL` (default `2`) and
+`WASM_LTO` (default `0`) control playback experiments. Analysis supports
+`ANALYSIS_OPT_LEVEL` (default `3`) and `ANALYSIS_LTO` (default `0`). SIMD remains
+enabled. Use separate build/output roots for comparisons; cached work with
+different source, compiler or optimization inputs is rejected. A cached FFmpeg
+checkout must match the requested source revision and have no tracked changes.
+Generated manifests include optimization parameters.
+
+On macOS ARM64 / Node 24 / Emscripten 6.0.9, analysis `-Oz + LTO` cut raw WASM
+from 2.90 MB to 1.34 MB but increased HEVC/VVC target-picture latency by about
+44–48%. `-O3 + LTO` produced 3.29 MB with only small timing differences. Neither
+is enabled by default. These observations are workload-specific, not browser
+performance guarantees; rerun correctness and playback benchmarks before
+changing defaults. HTTP precompression belongs to the consuming web server.
