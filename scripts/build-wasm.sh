@@ -91,7 +91,7 @@ fi
 # Never label a cached source checkout as a different requested revision.
 if ! EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse --verify "$FFMPEG_REF^{commit}" 2>/dev/null)"; then
     step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$FFMPEG_REF"
-    EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse FETCH_HEAD)"
+    EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse "FETCH_HEAD^{commit}")"
 fi
 [ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD)" = "$EXPECTED_REV" ] || die "Cached FFmpeg source differs from $FFMPEG_REF; use a fresh --build-root"
 [ -z "$(git -C "$FFMPEG_SOURCE" status --porcelain --untracked-files=no)" ] || die "FFmpeg source has tracked modifications"
