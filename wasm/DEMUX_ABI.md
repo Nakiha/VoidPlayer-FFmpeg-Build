@@ -7,11 +7,15 @@ libavformat, retaining its existing block/reference codec hooks and no swscale,
 network, filesystem or third WASM product.
 
 The pinned libavformat tree is `740392267b71cb9f0e6bd3b5b52173777b0d0939`.
-Both builders check it before assigning compatibility ID
-`ffmpeg-9.0.2-avformat-740392267b71-ts-nofill-v1`. `vpd_build_id` additionally
+Both builders also check the common parser.c source hash
+`cf5d65ee1699eb6a81f4da8df41edc6a503c5241` before assigning compatibility ID
+`ffmpeg-9.0.2-avformat-740392267b71-ts-raw-input-v2`. `vpd_build_id` additionally
 requires the exact build revision used by the read-only index; compatibility
-is not permission to accept another indexerBuild. H264/TS uses NOFILLIN so missing
-PES PTS/DTS remain AV_NOPTS_VALUE. Packet durations may consequently be zero;
+is not permission to accept another indexerBuild. H264/TS uses NOFILLIN plus a scoped link wrapper around av_parser_parse2.
+The wrapper preserves the generic parser's input timestamp descriptor selection
+before H264 HRD SEI can synthesize missing PTS/DTS. It covers stream inspection,
+reads and seeks; ordinary non-TS parser use remains unchanged. Missing original
+parser-input clocks remain AV_NOPTS_VALUE. NOFILLIN alone is insufficient. Packet durations may consequently be zero;
 no missing timestamp is replaced by another clock.
 
 `vpd_open(handle, size)` owns a format context, AVIO, packet and cursor separate
@@ -66,3 +70,23 @@ it does not claim these bytes were an avcC container record. Repeated identical
 parameter sets do not introduce an epoch; changed sets disable exact admission.
 `vpa_feed_known` adds independent PTS/DTS known bits while preserving the old
 `vpa_feed` entry for callers with two known clocks.
+
+## Review regression follow-ups
+
+SPS coding admission parses bounded RBSP and requires frame_mbs_only_flag=1.
+Field/MBAFF coding remains unsupported even when picture-timing SEI advertises
+FRAME and the actual AVFrame presentation flag becomes progressive. The raw
+presentation flag is exposed only as a diagnostic, never coding evidence.
+
+`test-ts-admission.mjs` runs paired actual WASMs with a 100-picture HRD control
+and physically absent PES clocks at AU 10/11/40/41. It also verifies progressive
+single-slice 25/25, two-slice 0/25, MBAFF 0/50 and contradictory FRAME-SEI MBAFF
+0/50 despite 50/50 progressive presentation flags. The latter fixture can contain
+pic_struct 3 or 4 depending on x264's B-picture selection; both become 0 while
+SPS, VCL and PES timestamps remain byte-identical.
+
+EM_JS catches synchronous IO exceptions and returns a negative read error to C;
+the original exception is retained for the host to rethrow after native unwind.
+Constructor failures release their packet, format, AVIO and context before
+returning NULL. `vpd_live_contexts` supports actual allocation-lifetime QA;
+repeated failures must not grow the module heap and a later reopen must succeed.

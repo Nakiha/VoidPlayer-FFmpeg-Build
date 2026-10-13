@@ -183,6 +183,7 @@ void vp_destroy(VPContext *ctx) {
 }
 
 void vp_close_input(VPContext *ctx) {
+    vp_parser_timing_guard(0);
     if (!ctx) return;
     free(ctx->identity_config);ctx->identity_config=NULL;
     free(ctx->identity_admission);ctx->identity_admission=NULL;
@@ -378,10 +379,10 @@ static void vp_attach_identity(VPContext *ctx) {
 }
 static void vp_receive_identity(VPContext *ctx) {
     memset(&ctx->picture,0,sizeof(ctx->picture));
-    if(!ctx->frame->opaque_ref || ctx->frame->opaque_ref->size!=sizeof(VPPictureInfo) ||
+    if(!ctx->identity_admission || !ctx->frame->opaque_ref || ctx->frame->opaque_ref->size!=sizeof(VPPictureInfo) ||
         ctx->frame->decode_error_flags || ctx->frame->flags&(AV_FRAME_FLAG_CORRUPT|AV_FRAME_FLAG_INTERLACED))return;
     VPPictureInfo id;memcpy(&id,ctx->frame->opaque_ref->data,sizeof(id));
-    if(id.abi!=1 || id.ordinal>=2000000 || ctx->frame->pts!=id.pts || ctx->identity_admission->changed)return;
+    if(id.abi!=1 || id.ordinal>=2000000 || ctx->frame->pts!=id.pts || (ctx->identity_admission->changed || ctx->identity_admission->unsupported))return;
     if(!ctx->identity_seen)ctx->identity_seen=calloc(250000,1);
     if(!ctx->identity_seen || (ctx->identity_seen[id.ordinal>>3]&(1u<<(id.ordinal&7))))return;
     ctx->identity_seen[id.ordinal>>3]|=1u<<(id.ordinal&7);ctx->picture=id;
@@ -390,7 +391,7 @@ int vp_picture_abi_version(void) { return 1; }
 const VPPictureInfo *vp_picture_info(VPContext *ctx) { return ctx && ctx->have_frame && ctx->picture.flags ? &ctx->picture : NULL; }
 int vp_identity_config_bytes(VPContext *ctx) {
     VPH264Admission *s=ctx?ctx->identity_admission:NULL;
-    return s && !s->changed && s->sps_size && s->pps_size ? 8+s->sps_size+s->pps_size : 0;
+    return s && !s->changed && !s->unsupported && s->sps_size && s->pps_size ? 8+s->sps_size+s->pps_size : 0;
 }
 const uint8_t *vp_identity_config(VPContext *ctx) {
     int n=vp_identity_config_bytes(ctx);if(!n)return NULL;
@@ -415,7 +416,7 @@ static int vp_decode_one(VPContext *ctx) {
         }
         if (ret != AVERROR(EAGAIN)) return VP_ERR;
 
-        ret = av_read_frame(ctx->fmt, ctx->pkt);
+        ret = vp_demux_read_frame(ctx->fmt, ctx->pkt);
         if (ret == AVERROR_EOF) {
             avcodec_send_packet(ctx->dec, NULL);
             continue;
@@ -697,7 +698,7 @@ int vp_index_scan_step(VPContext *ctx, int packet_budget) {
     if (!ctx || !ctx->index_scan_active || packet_budget <= 0) return VP_ERR;
     int processed = 0;
     while (processed < packet_budget) {
-        int ret = av_read_frame(ctx->fmt, ctx->pkt);
+        int ret = vp_demux_read_frame(ctx->fmt, ctx->pkt);
         if (ret == AVERROR_EOF) {
             if (vp_index_scan_finish(ctx) < 0) return VP_ERR;
             return processed;
@@ -1137,7 +1138,7 @@ int vp_extract(VPContext *ctx, int64_t target_ticks) {
         if (seek) {
             // Seek-by-byte-estimation demuxers (e.g. MPEG-TS) can land past
             // the target; on overshoot restart once from the beginning.
-            if (av_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : seek_ticks,
+            if (vp_demux_seek_frame(ctx->fmt, ctx->stream_idx, restarted ? 0 : seek_ticks,
                               AVSEEK_FLAG_BACKWARD) < 0) {
                 ctx->extract_restarts++;
                 vp_rewind_start(ctx->fmt, ctx->stream_idx);
@@ -1187,6 +1188,7 @@ int vp_prime_first_presentable(VPContext *ctx) {
     }
 }
 
+int vp_frame_interlaced(VPContext *ctx) { return ctx && ctx->have_frame ? !!(ctx->frame->flags&AV_FRAME_FLAG_INTERLACED) : -1; }
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
 uint8_t *vp_pixels(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->pixels : NULL; }
 const VPFrameInfo *vp_frame_info(VPContext *ctx) { return ctx && ctx->have_frame ? &ctx->output : NULL; }

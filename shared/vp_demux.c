@@ -5,15 +5,23 @@
 #include <libavutil/mem.h>
 #include <emscripten.h>
 EM_JS(long, vp_js_read, (int handle, double offset, uint8_t *buf, int len), {
-    if (Module.vpDemuxRead && handle < 0) {
-        const bytes = Module.vpDemuxRead(-handle, offset, len);
-        if (!bytes || bytes.length > len) return -1;
+    try {
+        if (Module.vpDemuxRead && handle < 0) {
+            const bytes = Module.vpDemuxRead(-handle, offset, len);
+            if (typeof bytes === 'number' && bytes < 0) return -1;
+            if (!bytes || bytes.length > len) return -1;
+            HEAPU8.set(bytes, buf); return bytes.length;
+        }
+        const entry = Module.vpBlobs && Module.vpBlobs.get(handle);
+        if (!entry) return -1;
+        const bytes = new Uint8Array(entry.reader.readAsArrayBuffer(entry.blob.slice(offset, offset + len)));
+        if (bytes.length > len) return -1;
         HEAPU8.set(bytes, buf); return bytes.length;
+    } catch (error) {
+        // Never unwind a JS exception past an unreturned C allocation.
+        // Hosts may preserve/rethrow the original failure after C unwinds.
+        Module.vpDemuxError = error; return -1;
     }
-    const entry = Module.vpBlobs && Module.vpBlobs.get(handle);
-    if (!entry) return -1;
-    const bytes = new Uint8Array(entry.reader.readAsArrayBuffer(entry.blob.slice(offset, offset + len)));
-    HEAPU8.set(bytes, buf); return bytes.length;
 });
 int vp_avio_read(void *opaque, uint8_t *buf, int size) {
     VpBlobIO *io = opaque;
@@ -35,6 +43,7 @@ int64_t vp_avio_seek(void *opaque, int64_t offset, int whence) {
     io->pos = pos; return pos;
 }
 void vp_blob_close(AVFormatContext **fmt, AVIOContext **pb, VpBlobIO **io) {
+    vp_parser_timing_guard(0);
     avformat_close_input(fmt);
     if (*pb) { av_freep(&(*pb)->buffer); avio_context_free(pb); }
     free(*io); *io = NULL;
@@ -55,7 +64,10 @@ failed:
     vp_blob_close(fmt, pb, io); return AVERROR(EIO);
 }
 int vp_select_video(AVFormatContext *fmt, const AVCodec **codec) {
-    if (avformat_find_stream_info(fmt, NULL) < 0) return AVERROR_INVALIDDATA;
+    vp_parser_timing_guard(!strcmp(fmt->iformat->name,"mpegts"));
+    int inspected=avformat_find_stream_info(fmt,NULL);
+    vp_parser_timing_guard(0);
+    if(inspected<0)return AVERROR_INVALIDDATA;
     int selected=av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, codec, 0);
     // Preserve missing PES timestamp state for the admitted AVC/TS path.
     // Parsing still reassembles AU payload; no guessed PTS/DTS enters identity.
@@ -93,8 +105,50 @@ int vp_h264_single(const uint8_t *p, int n) {
     return slices==1;
 }
 
+typedef struct { const uint8_t *bytes; int size,at,invalid; } VPBits;
+static uint32_t vp_bits(VPBits *b,int count) {
+    if(count<0 || count>32 || b->at>b->size*8-count){b->invalid=1;return 0;}
+    uint32_t value=0;for(int i=0;i<count;i++,b->at++)value=(value<<1)|((b->bytes[b->at>>3]>>(7-(b->at&7)))&1);
+    return value;
+}
+static uint32_t vp_ue(VPBits *b,uint32_t maximum) {
+    int zeros=0;while(!vp_bits(b,1)){if(b->invalid || ++zeros>30){b->invalid=1;return 0;}}
+    uint32_t value=((1u<<zeros)-1)+vp_bits(b,zeros);
+    if(value>maximum)b->invalid=1;return value;
+}
+static int32_t vp_se(VPBits *b) {uint32_t value=vp_ue(b,65535);return value&1?(int32_t)((value+1)/2):-(int32_t)(value/2);}
+static int vp_sps_progressive(const uint8_t *nal,int size) {
+    if(size<5 || size>4096 || (nal[0]&31)!=7 || (nal[0]&128))return 0;
+    uint8_t rbsp[4096];int count=0;
+    for(int i=1;i<size;i++) {
+        if(i>=3 && nal[i]==3 && !nal[i-1] && !nal[i-2]) {
+            if(i+1>=size || nal[i+1]>3)return 0;continue;
+        }
+        rbsp[count++]=nal[i];
+    }
+    VPBits b={rbsp,count,0,0};int profile=vp_bits(&b,8);vp_bits(&b,16);vp_ue(&b,31);
+    int high=profile==100||profile==110||profile==122||profile==244||profile==44||profile==83||profile==86||profile==118||profile==128||profile==138||profile==139||profile==134||profile==135;
+    if(high) {
+        int chroma=vp_ue(&b,3);
+        if(chroma==3 && vp_bits(&b,1))return 0; // separate colour planes are outside this identity ABI
+        vp_ue(&b,6);vp_ue(&b,6);vp_bits(&b,1);
+        if(vp_bits(&b,1))for(int i=0;i<(chroma==3?12:8);i++)if(vp_bits(&b,1)) {
+            int last=8,next=8;
+            for(int j=0;j<(i<6?16:64);j++){if(next)next=(last+vp_se(&b)+256)%256;last=next?next:last;}
+        }
+    } else if(profile!=66 && profile!=77 && profile!=88)return 0;
+    vp_ue(&b,12);int poc=vp_ue(&b,2);
+    if(!poc)vp_ue(&b,12);
+    else if(poc==1){vp_bits(&b,1);vp_se(&b);vp_se(&b);int n=vp_ue(&b,255);for(int i=0;i<n;i++)vp_se(&b);}
+    vp_ue(&b,16);vp_bits(&b,1);vp_ue(&b,2047);vp_ue(&b,2047);
+    int frame_mbs_only=vp_bits(&b,1);
+    // The coding structure is authoritative. Presentation SEI/AVFrame flags
+    // can describe FRAME while the SPS still enables field/MBAFF coding.
+    return !b.invalid && frame_mbs_only==1;
+}
+
 int vp_h264_admit(VPH264Admission *state, const uint8_t *p, int n) {
-    if(!state || state->changed)return 0;
+    if(!state || state->changed || state->unsupported)return 0;
     int at=0; while(at<n && !prefix(p,n,at)) { if(p[at++]){state->changed=1;return 0;} }
     while(at<n) {
         int start=at+prefix(p,n,at),end=start; while(end<n && !prefix(p,n,end))end++;
@@ -102,6 +156,7 @@ int vp_h264_admit(VPH264Admission *state, const uint8_t *p, int n) {
         if(last>start && ((p[start]&31)==7 || (p[start]&31)==8)) {
             int size=last-start, sps=(p[start]&31)==7;
             uint8_t *saved=sps?state->sps:state->pps; int *saved_size=sps?&state->sps_size:&state->pps_size;
+            if(sps && !vp_sps_progressive(p+start,size)){state->unsupported=1;return 0;}
             if(size>4096 || (*saved_size && (*saved_size!=size || memcmp(saved,p+start,size)))){state->changed=1;return 0;}
             if(!*saved_size){memcpy(saved,p+start,size);*saved_size=size;}
         }
@@ -114,6 +169,20 @@ int vp_rewind_start(AVFormatContext *fmt,int stream) {
     // Timestamp seeking can skip an untimed first PES. Full source enumeration
     // must rewind by byte and reset parser buffers for the admitted TS path.
     if(!strcmp(fmt->iformat->name,"mpegts") && fmt->streams[stream]->codecpar->codec_id==AV_CODEC_ID_H264)
-        return av_seek_frame(fmt,-1,0,AVSEEK_FLAG_BYTE);
-    return av_seek_frame(fmt,stream,0,AVSEEK_FLAG_BACKWARD);
+        return vp_demux_seek_frame(fmt,-1,0,AVSEEK_FLAG_BYTE);
+    return vp_demux_seek_frame(fmt,stream,0,AVSEEK_FLAG_BACKWARD);
+}
+
+int vp_demux_read_frame(AVFormatContext *fmt,AVPacket *packet) {
+    vp_parser_timing_guard(!strcmp(fmt->iformat->name,"mpegts"));
+    int result=av_read_frame(fmt,packet);
+    vp_parser_timing_guard(0);
+    return result;
+}
+
+int vp_demux_seek_frame(AVFormatContext *fmt,int stream,int64_t ticks,int flags) {
+    vp_parser_timing_guard(!strcmp(fmt->iformat->name,"mpegts"));
+    int result=av_seek_frame(fmt,stream,ticks,flags);
+    vp_parser_timing_guard(0);
+    return result;
 }

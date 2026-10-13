@@ -19,19 +19,22 @@ typedef struct {
 #define VP_CORE_BUILD_ID "unknown"
 #endif
 const char *vpd_build_id(void) { return VP_CORE_BUILD_ID; }
+static int live_contexts;
+int vpd_live_contexts(void) { return live_contexts; }
 int vpd_abi(void) { return 1; }
-const char *vpd_compat_id(void) { return "ffmpeg-9.0.2-avformat-740392267b71-ts-nofill-v1"; }
+const char *vpd_compat_id(void) { return "ffmpeg-9.0.2-avformat-740392267b71-ts-raw-input-v2"; }
 VPDContext *vpd_open(int handle, int64_t size) {
     VPDContext *c=calloc(1,sizeof(*c)); if(!c)return NULL;
+    live_contexts++;
     c->pkt=av_packet_alloc();
     if(!c->pkt || vp_blob_open(&c->fmt,&c->pb,&c->io,handle,size)<0)goto failed;
     c->stream=vp_select_video(c->fmt,NULL); if(c->stream<0)goto failed;
     if(vp_rewind_start(c->fmt,c->stream)<0)goto failed;
     return c;
 failed:
-    vp_blob_close(&c->fmt,&c->pb,&c->io); av_packet_free(&c->pkt); free(c); return NULL;
+    vp_blob_close(&c->fmt,&c->pb,&c->io); av_packet_free(&c->pkt); free(c); live_contexts--; return NULL;
 }
-void vpd_close(VPDContext *c) { if(!c)return; vp_blob_close(&c->fmt,&c->pb,&c->io); av_packet_free(&c->pkt); free(c->records); free(c); }
+void vpd_close(VPDContext *c) { if(!c)return; vp_blob_close(&c->fmt,&c->pb,&c->io); av_packet_free(&c->pkt); free(c->records); free(c); live_contexts--; }
 int vpd_stream(VPDContext *c) { return c?c->stream:-1; }
 int vpd_video_count(VPDContext *c) { int n=0; if(c)for(unsigned i=0;i<c->fmt->nb_streams;i++)n+=c->fmt->streams[i]->codecpar->codec_type==AVMEDIA_TYPE_VIDEO; return n; }
 const char *vpd_codec(VPDContext *c) { return c?avcodec_get_name(c->fmt->streams[c->stream]->codecpar->codec_id):""; }
@@ -63,7 +66,7 @@ int vpd_read(VPDContext *c,int budget) {
     if(!c || budget<1 || budget>4096 || c->out.payload)return -1;
     if(c->eof)return 0;
     for(int i=0;i<budget;i++) {
-        int ret=av_read_frame(c->fmt,c->pkt);
+        int ret=vp_demux_read_frame(c->fmt,c->pkt);
         if(ret==AVERROR_EOF){c->eof=1;return 0;}
         if(ret<0)return ret;
         c->packets++;
@@ -92,5 +95,5 @@ int vpd_read(VPDContext *c,int budget) {
 int vpd_seek(VPDContext *c,int64_t dts) {
     if(!c || !c->records || dts==AV_NOPTS_VALUE)return -1;
     vpd_release(c); c->eof=0;c->next=UINT64_MAX;
-    return av_seek_frame(c->fmt,c->stream,dts,AVSEEK_FLAG_BACKWARD);
+    return vp_demux_seek_frame(c->fmt,c->stream,dts,AVSEEK_FLAG_BACKWARD);
 }

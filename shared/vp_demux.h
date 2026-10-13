@@ -9,6 +9,9 @@ typedef struct VPIndexRecordV3 {
     int32_t packet_size; uint32_t flags; uint64_t ordinal;
 } VPIndexRecordV3;
 _Static_assert(sizeof(VPIndexRecordV3) == 48, "index ABI v3 record size");
+void vp_parser_timing_guard(int);
+int vp_demux_seek_frame(AVFormatContext *, int, int64_t, int);
+int vp_demux_read_frame(AVFormatContext *, AVPacket *);
 int vp_avio_read(void *, uint8_t *, int);
 int64_t vp_avio_seek(void *, int64_t, int);
 int vp_blob_open(AVFormatContext **, AVIOContext **, VpBlobIO **, int, int64_t);
@@ -20,6 +23,6 @@ uint64_t vp_packet_hash(const uint8_t *, int);
 /* Conservative first milestone: exactly one AVC VCL slice starting at MB 0.
  * Interlaced output is separately refused at receive. No M:N inference. */
 int vp_h264_single(const uint8_t *, int);
-typedef struct { uint8_t sps[4096],pps[4096]; int sps_size,pps_size,changed; } VPH264Admission;
+typedef struct { uint8_t sps[4096],pps[4096]; int sps_size,pps_size,changed,unsupported; } VPH264Admission;
 int vp_h264_admit(VPH264Admission *, const uint8_t *, int);
 #endif
