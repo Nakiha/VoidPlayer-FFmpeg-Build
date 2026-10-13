@@ -51,6 +51,11 @@ jobs:
           node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
           node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
 
+      - name: Verify packet coded crop and SAR in YUV and RGBA outputs
+        run: |
+          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
+          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
+
       - name: Create MPEG-TS regression sample
         run: |
           mkdir -p .build

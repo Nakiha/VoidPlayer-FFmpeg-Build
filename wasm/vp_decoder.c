@@ -1214,6 +1214,9 @@ int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int s
     if (!codec) return VP_ERR;
     ctx->dec = avcodec_alloc_context3(codec);
     if (!ctx->dec) return VP_ERR;
+    /* Preserve coded-space crop offsets for the frame ABI. Libavcodec's
+     * aligned automatic crop can discard the origin and leave extra pixels. */
+    ctx->dec->apply_cropping = 0;
     ctx->dec->pkt_timebase = (AVRational){1, 1000000};
     ctx->dec->strict_std_compliance = FF_COMPLIANCE_STRICT;
     ctx->dec->thread_count = 1;
