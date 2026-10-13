@@ -229,6 +229,21 @@ step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
+# Emscripten 6 resolves the pthread entry by basename, dropping the content
+# version query on import.meta.url. Reuse the exact importing glue URL so an
+# older cached main Worker cannot accidentally launch newer pthread glue.
+if $MT; then
+    python3 - "$PACKAGE_ROOT/voidplayer-core-mt.js" <<'PYTHON'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+old = 'new URL("voidplayer-core-mt.js",import.meta.url)'
+if s.count(old) != 1:
+    raise SystemExit('Emscripten pthread URL changed; review version preservation')
+p.write_text(s.replace(old, 'new URL(import.meta.url)'))
+PYTHON
+fi
+
 # ---------------------------------------------------------------------------
 # Licenses, manifest, archive
 # ---------------------------------------------------------------------------
