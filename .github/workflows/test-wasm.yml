@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   wasm:
-    name: WASM ABI v3, corruption prefixes and MPEG-TS seek round-trip
+    name: WASM packet ABI, removed demuxers and residual index round-trip
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -56,17 +56,17 @@ jobs:
           node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
           node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
 
-      - name: Create MPEG-TS regression sample
+      - name: Create MPEG-PS regression sample
         run: |
           mkdir -p .build
           ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x90:rate=24" \
             -frames:v 48 -an -c:v mpeg2video -g 12 -bf 2 -pix_fmt yuv420p \
-            -f mpegts .build/seek-regression.ts
+            -f mpeg .build/seek-regression.mpg
 
       - name: Test import, seek anchors, and random-seek pixels
         run: |
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.2" .build/seek-regression.ts
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.2" --stem voidplayer-core-mt .build/seek-regression.ts
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.2" .build/seek-regression.mpg
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.2" --stem voidplayer-core-mt .build/seek-regression.mpg
 
       - name: Check MPEG-PS video probing after decoder trimming
         run: |
@@ -89,21 +89,21 @@ jobs:
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 --require-untimed .build/probe-untimed.mpg
           node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt --require-untimed .build/probe-untimed.mpg
 
-      - name: Create long B-frame TS sample
+      - name: Create long B-frame PS sample
         run: |
           ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=128x96:rate=25" \
             -t 70 -an -c:v mpeg2video -threads 1 -g 12 -bf 2 -muxrate 2000000 \
-            -f mpegts .build/indexed-seek-regression.ts
+            -f mpeg .build/indexed-seek-regression.mpg
 
-      - name: Test pre-index first frame, scan progress, and random-seek pixels
+      - name: Test long residual PS index import and random-seek pixels
         run: |
-          node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js .build/indexed-seek-regression.ts
-          node scripts/test-indexed-seek.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js .build/indexed-seek-regression.ts
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 .build/indexed-seek-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt .build/indexed-seek-regression.mpg
 
-      - name: Test corrupt tails, retained B pictures, imported prefixes and IO failures
+      - name: Verify removed containers cannot open and all residual demuxers retain indexing
         run: |
-          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js" .build/indexed-seek-regression.ts
-          node scripts/test-corrupt-prefix.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js" .build/indexed-seek-regression.ts
+          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js"
+          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js"
 
       - uses: actions/upload-artifact@v4
         with:

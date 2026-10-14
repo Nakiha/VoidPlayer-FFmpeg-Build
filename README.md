@@ -54,6 +54,36 @@ VoidPlayer does not ship:
 | Windows x64 | D3D11VA / D3D12VA / DXVA2 | SFTP via static libssh |
 | macOS arm64 | VideoToolbox | none |
 
+## Packet-first browser core
+
+The Web application owns MOV/MP4, Matroska/WebM, MPEG-TS and FLV demux/index
+work in JavaScript. Both WebCodecs and this packet-fed WASM decoder consume
+that same container adapter. Playback now registers only `avi`, `mpeg`
+(configure name `mpegps`) and `mpegvideo` for the remaining container path.
+The analysis product links only avcodec/avutil and registers no demuxers.
+Neither product exports the former independent `vpd_*` container API.
+
+Every ST/MT/analysis build emits a capability manifest from the **instantiated
+binary's registry**, including its exact SHA-256, source revision, decoders,
+linked library set and removed exports. Configure signatures include demuxers,
+decoders and parsers; changed signatures require a fresh FFmpeg output tree.
+An explicit `EM_CACHE` survives SDK environment initialization.
+
+`vp_packet_open_config` accepts ABI v1 (40 bytes) coded dimensions, rational
+SAR and original container color enums before decoder initialization. This
+preserves FFV1 metadata without a container in the decoder. Unknown timestamps
+remain unknown; the JS owner supplies packet clocks and independent cursors.
+
+Validation ownership changed with container removal. `test-demux-removal.mjs`
+checks actual removed-format rejection and PS/AVI/elementary residual indexing;
+`test-hdr-planes.mjs` now feeds native-extracted HEVC packets and retains its
+exact PQ/HLG sample/tag assertions. The Web `stream-tail` regression retains
+all existing damage/prefix pixel assertions on JS TS/Matroska, and its server
+index regression owns cold/warm prefix reuse. Original TS-private C diagnostic
+scripts below describe the previous implementation and cannot run against a
+binary that deliberately has no TS demuxer. They are retained for historical
+comparison, not counted as validation of this build.
+
 ## WASM decoder core (web prototype)
 
 `scripts/build-wasm.sh` builds a trimmed single-threaded Emscripten core for
