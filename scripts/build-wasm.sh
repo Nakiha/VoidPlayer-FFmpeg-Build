@@ -67,12 +67,15 @@ step() {
 # Prerequisites: Emscripten SDK (already on PATH, or local .toolchains / $EMSDK)
 # ---------------------------------------------------------------------------
 
+VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null 2>&1; then
     [ -f "$EMSDK_ROOT/emsdk_env.sh" ] || die "emcc not on PATH and emsdk not found at $EMSDK_ROOT. Clone https://github.com/emscripten-core/emsdk there and run: emsdk install latest && emsdk activate latest"
     # shellcheck disable=SC1091
     source "$EMSDK_ROOT/emsdk_env.sh" >/dev/null
 fi
 command -v emcc >/dev/null 2>&1 || die "emcc not found"
+# emsdk_env clears EM_CACHE; preserve an explicitly isolated build cache.
+if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi
 
 # ---------------------------------------------------------------------------
 # Directory setup and source clone
