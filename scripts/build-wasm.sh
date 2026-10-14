@@ -279,7 +279,7 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
   "ffmpegRevision": "$EXPECTED_REV",
   "optimization": {"compile": "$WASM_OPT_LEVEL", "link": "$WASM_LINK_OPT_LEVEL", "lto": "$WASM_LTO", "simd": "$WASM_SIMD"},
   "builtAtUtc": "$BUILT_AT",
-  "libraries": ["avcodec", "avformat", "avutil", "swscale"],
+  "libraries": ["avcodec", "avformat", "avutil", "swscale", "dav1d"],
   "demuxers": "$(echo $DEMUXERS)",
   "decoders": "$(echo $DECODERS)",
   "audio": "not included",
