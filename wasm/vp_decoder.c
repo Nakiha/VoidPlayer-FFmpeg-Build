@@ -1200,8 +1200,19 @@ const char *vp_frame_format(VPContext *ctx) {
 // Packet-only decoder: TS owns demux, timestamps and seeking. Compressed data
 // is written directly into an AVPacket allocation, avoiding a second packet
 // copy inside the core. Call receive until EAGAIN before sending more input.
-int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
+typedef struct {
+    int32_t version, bytes, width, height, sar_num, sar_den;
+    int32_t color_primaries, color_trc, colorspace, color_range;
+} VPPacketConfig;
+_Static_assert(sizeof(VPPacketConfig) == 40, "packet configuration ABI");
+int vp_packet_config_bytes(void) { return sizeof(VPPacketConfig); }
+int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra, int size, const VPPacketConfig *config) {
     if (!ctx || !name || size < 0 || size > 1024 * 1024) return VP_ERR;
+    if (config && (config->version != 1 || config->bytes != sizeof(VPPacketConfig) ||
+        config->width < 1 || config->height < 1 || config->width > 32768 || config->height > 32768 ||
+        config->sar_num < 1 || config->sar_den < 1 || config->color_primaries < 0 || config->color_primaries > 255 ||
+        config->color_trc < 0 || config->color_trc > 255 || config->colorspace < 0 || config->colorspace > 255 ||
+        config->color_range < 0 || config->color_range > 2)) return VP_ERR;
     vp_close_input(ctx);
     const AVCodec *codec = avcodec_find_decoder_by_name(!strcmp(name, "av1") ? "libdav1d" : name);
     if (!codec) return VP_ERR;
@@ -1212,6 +1223,12 @@ int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int s
     ctx->dec->apply_cropping = 0;
     ctx->dec->pkt_timebase = (AVRational){1, 1000000};
     ctx->dec->strict_std_compliance = FF_COMPLIANCE_STRICT;
+    if (config) {
+        ctx->dec->width = config->width; ctx->dec->height = config->height;
+        ctx->dec->sample_aspect_ratio = (AVRational){config->sar_num, config->sar_den};
+        ctx->dec->color_primaries = config->color_primaries; ctx->dec->color_trc = config->color_trc;
+        ctx->dec->colorspace = config->colorspace; ctx->dec->color_range = config->color_range;
+    }
     ctx->dec->thread_count = 1;
 #ifdef VP_MT
     ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : 2;
@@ -1223,6 +1240,9 @@ int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int s
         ctx->dec->extradata_size = size;
     }
     return avcodec_open2(ctx->dec, codec, NULL) < 0 ? VP_ERR : 0;
+}
+int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
+    return vp_packet_open_config(ctx, name, extra, size, NULL);
 }
 
 uint8_t *vp_packet_alloc(VPContext *ctx, int size) {

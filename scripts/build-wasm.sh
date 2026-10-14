@@ -125,7 +125,7 @@ WASM_LTO="${WASM_LTO:-0}"
 [[ "$WASM_LTO" =~ ^(0|1)$ ]] || die "Invalid WASM_LTO"
 if [ "$WASM_LTO" = 1 ]; then SIMD_CFLAGS="$SIMD_CFLAGS -flto"; fi
 SIMD_ARGS=("--extra-cflags=$SIMD_CFLAGS" "--extra-ldflags=$SIMD_CFLAGS" "--optflags=-O$WASM_OPT_LEVEL")
-SIGNATURE="$EXPECTED_REV:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
+SIGNATURE="$EXPECTED_REV:demux=$DEMUXERS:decoders=$DECODERS,libdav1d:parsers=$PARSERS:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
 if [ -f "$FFMPEG_BUILD/config.h" ] && [ "$(cat "$FFMPEG_BUILD/.build-signature" 2>/dev/null || true)" != "$SIGNATURE" ]; then
     die "Build inputs changed; use a fresh --build-root"
 fi
@@ -215,7 +215,7 @@ if $MT; then
     MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
 fi
 
-step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_packet_demux.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
+step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_capabilities.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
     -include "$CORE_BUILD_ID_HEADER" \
     -I"$FFMPEG_INSTALL/include" \
     -L"$FFMPEG_INSTALL/lib" \
@@ -227,7 +227,7 @@ step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_frame_interlaced,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vpd_live_contexts,_vpd_build_id,_vpd_abi,_vpd_compat_id,_vpd_open,_vpd_close,_vpd_stream,_vpd_video_count,_vpd_codec,_vpd_format,_vpd_extra_size,_vpd_extra,_vpd_tb_num,_vpd_tb_den,_vpd_bytes,_vpd_packets,_vpd_release,_vpd_packet,_vpd_bind_index,_vpd_read,_vpd_seek \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_frame_interlaced,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_open_config,_vp_packet_config_bytes,_vp_packet_alloc,_vp_packet_send,_vp_packet_receive,_vp_packet_reset,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vp_capability_abi,_vp_build_id,_vp_demuxer_count,_vp_demuxer_name,_vp_decoder_count,_vp_decoder_name \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
@@ -250,6 +250,8 @@ fi
 # Licenses, manifest, archive
 # ---------------------------------------------------------------------------
 
+node "$REPO_ROOT/scripts/write-capabilities.mjs" "$PACKAGE_ROOT" playback "voidplayer-core${SUFFIX}" "$DEMUXERS" "$DECODERS"
+
 LICENSE_ROOT="$PACKAGE_ROOT/LICENSES"
 mkdir -p "$LICENSE_ROOT"
 for f in "$FFMPEG_SOURCE"/COPYING*; do
@@ -266,9 +268,9 @@ cat > "$PACKAGE_ROOT/voidplayer-ffmpeg-manifest.json" <<EOF
 {
   "package": "$PACKAGE_NAME",
   "target": "wasm32-emscripten",
-  "demuxAbi": 1,
+  "demuxAbi": 0,
   "pictureAbi": 1,
-  "demuxCompatibility": "ffmpeg-9.0.2-avformat-740392267b71-ts-raw-input-v2",
+  "capabilityManifest": "capabilities${SUFFIX}.json",
   "ffmpegRef": "$FFMPEG_REF",
   "ffmpegRemote": "$FFMPEG_REMOTE",
   "ffmpegRevision": "$EXPECTED_REV",
