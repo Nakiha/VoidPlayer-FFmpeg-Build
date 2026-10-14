@@ -16,14 +16,17 @@ const actualDemuxers=registry('demuxer'),actualDecoders=registry('decoder');
 const declaredDemuxers=demuxers.split(/\s+/).filter(Boolean).sort(),declaredDecoders=decoders.split(/\s+/).filter(Boolean).sort();
 const configureName=name=>{const first=name.split(',')[0];return first==='mpeg'?'mpegps':first;};
 assert.deepEqual(actualDemuxers.map(configureName).sort(),declaredDemuxers,'actual linked demux registry differs from configure declaration');
-assert.deepEqual(actualDecoders,declaredDecoders,'actual linked codec registry differs from configure declaration');
+// FFmpeg's pinned configure selects h263_decoder for mpeg4_decoder. Keep
+// that dependency explicit rather than misreporting the linked registry.
+const decoderDependencies=declaredDecoders.includes('mpeg4')?['h263']:[];
+assert.deepEqual(actualDecoders,[...new Set([...declaredDecoders,...decoderDependencies])].sort(),'actual linked codec registry differs from configure declaration and dependencies');
 const independentDemuxExports=Object.keys(core).filter(name=>name.startsWith('_vpd_')).sort();
 assert.deepEqual(independentDemuxExports,[],'independent container demux ABI must be removed');
 const containerEntries=['_vp_open','_vp_open_blob','_vp_open_range'].filter(name=>typeof core[name]==='function');
 if(product==='analysis')assert.deepEqual(containerEntries,[]);
 const root=path.resolve(import.meta.dirname,'..'),revision=execFileSync('git',['-C',root,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
 assert.equal(string(core._vp_build_id()),revision,'actual WASM build identity differs from source');
-const capability={schema:1,abi:1,product,variant:stem.endsWith('-mt')?'pthreads':'single',revision,wasmSha256:createHash('sha256').update(wasm).digest('hex'),declaredDemuxers,registeredDemuxers:actualDemuxers,registeredDecoders:actualDecoders,libraries:product==='analysis'?['avcodec','avutil']:['avformat','avcodec','swscale','avutil','dav1d'],containerEntries,independentDemuxExports};
+const capability={schema:1,abi:1,product,variant:stem.endsWith('-mt')?'pthreads':'single',revision,wasmSha256:createHash('sha256').update(wasm).digest('hex'),declaredDemuxers,registeredDemuxers:actualDemuxers,declaredDecoders,decoderDependencies,registeredDecoders:actualDecoders,libraries:product==='analysis'?['avcodec','avutil']:['avformat','avcodec','swscale','avutil','dav1d'],containerEntries,independentDemuxExports};
 const file=path.join(directory,stem.endsWith('-mt')?'capabilities-mt.json':'capabilities.json');
 await writeFile(file,JSON.stringify(capability,null,2)+'\n');console.log(`Verified ${product} registry: ${actualDemuxers.join(' ')||'(no container demux)'}`);
 // The capability probe owns this isolated Node process and any pthread pool.
