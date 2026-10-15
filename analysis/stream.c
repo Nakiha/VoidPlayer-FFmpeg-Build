@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "voidplayer_block_sort.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/voidplayer_vachunk.h"
 #include "libavutil/pixdesc.h"
@@ -19,9 +20,8 @@ double vpa_pts(void); int vpa_take(int maxBytes); int vpa_record_bytes(void);
 void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list);
 int vpa_reference_abi(void); int vpa_ref_count(void); int vpa_refs(void); int vpa_refs_invalid(void); int vpa_picture_type(void); int vpa_poc(void);
 #define MAX_PICTURES 32
-#define MAX_BLOCKS 131072
+#define MAX_BLOCKS VPA_BLOCK_LIMIT
 #define MAX_RECORD_BYTES (32*1024*1024)
-typedef struct { uint16_t x,y,w,h; int16_t qp; uint8_t mode,depth; } Block;
 typedef struct { uintptr_t id; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; uint32_t refs[128], ref_count; int refs_invalid, type, poc; } Picture;
 static Picture pictures[MAX_PICTURES];
 static AVCodecContext *decoder;
@@ -102,7 +102,6 @@ int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known
 }
 int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal){return vpa_feed_known(bytes,size,pts,dts,3,ordinal);}
 int vpa_drain(void){if(!decoder)return AVERROR(EINVAL);int ret=avcodec_send_packet(decoder,NULL);return ret==AVERROR(EAGAIN)?2:ret;}
-static int compare(const void *a,const void *b){const Block *x=a,*y=b;return x->y!=y->y?(int)x->y-y->y:(int)x->x-y->x;}
 /* Successful decoder output is picture-complete for the single-thread build.
  * Refuse field/multilayer/invalid frames and clipped negative/high-depth QP. */
 int vpa_step(void){
@@ -114,7 +113,7 @@ int vpa_step(void){
     p->invalid|=frame->decode_error_flags!=0||(frame->flags&AV_FRAME_FLAG_CORRUPT)||(frame->flags&AV_FRAME_FLAG_INTERLACED)||!fmt;
     p->depth=fmt?fmt->comp[0].depth:0;
     p->sealed=1;p->pts=frame->pts;
-    qsort(p->blocks,p->count,sizeof(Block),compare);ready=p;
+    if(vpa_block_sort(p->blocks,p->count,p->capacity,p->width,p->height)<0){av_frame_unref(frame);failure=AVERROR_INVALIDDATA;return failure;}ready=p;
     av_frame_unref(frame);return 1;
 }
 int vpa_count(void){return ready?ready->count:0;}

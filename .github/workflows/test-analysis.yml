@@ -57,6 +57,8 @@ jobs:
             bash "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh" > "$RUNNER_TEMP/evidence/baseline-build.log" 2>&1
           cp "$RUNNER_TEMP/baseline/manifest.json" "$RUNNER_TEMP/evidence/baseline-manifest.json"
           cp "$RUNNER_TEMP/baseline/capabilities.json" "$RUNNER_TEMP/evidence/baseline-capabilities.json"
+      - name: Verify sort ties, boundaries, collector budgets and cancellation
+        run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json"
       - name: Generate test patterns and compare complete ABI and failure behavior
         env:
           BASELINE_REVISION: ${{ github.event.pull_request.base.sha }}
@@ -69,8 +71,10 @@ jobs:
             -x264-params 'threads=1:keyint=30:min-keyint=30:scenecut=0:open-gop=0:bframes=2' "$RUNNER_TEMP/fixtures/h264.mp4"
           ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 180 -c:v libx265 -pix_fmt yuv420p -tag:v hvc1 \
             -x265-params 'pools=none:frame-threads=1:keyint=60:min-keyint=60:scenecut=0:open-gop=0:bframes=3:log-level=error' "$RUNNER_TEMP/fixtures/hevc.mp4"
+          ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 60 -c:v libx265 -pix_fmt yuv420p10le -tag:v hvc1 \
+            -x265-params 'pools=none:frame-threads=1:keyint=30:min-keyint=30:scenecut=0:open-gop=0:bframes=3:log-level=error' "$RUNNER_TEMP/fixtures/hevc10.mp4"
           node scripts/test-analysis-backend.mjs "$RUNNER_TEMP/baseline/voidplayer-analysis.js" \
-            "$RUNNER_TEMP/candidate/voidplayer-analysis.js" "$RUNNER_TEMP/evidence/oracle.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4"
+            "$RUNNER_TEMP/candidate/voidplayer-analysis.js" "$RUNNER_TEMP/evidence/oracle.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4"
           cd "$RUNNER_TEMP/candidate"
           sha256sum * > "$RUNNER_TEMP/evidence/members.sha256"
           zip -X "$RUNNER_TEMP/analysis-${{ github.event.pull_request.head.sha }}.zip" ./*

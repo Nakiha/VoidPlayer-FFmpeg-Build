@@ -64,3 +64,31 @@ coverage here: the separate local release check compares 49 VVC frames alongside
 180 HEVC and 30 H264 frames, without redistributing those local fixtures.
 Performance percentages belong to fixed-machine paired experiments, not CI
 thresholds or end-to-end application guarantees.
+
+Block sorting keeps the same `(y,x)` comparator and 12-byte records. A strictly
+increasing sequence returns immediately. Otherwise an in-place typed heapsort
+is used only after proving coordinate uniqueness with a bounded 4-pixel-grid
+bitset in the existing allocation's unused tail. At 4096x2304 the bitset needs
+73728 bytes. It never grows the allocation or changes record-byte accounting.
+Insufficient spare capacity, unsupported coordinates/geometry, or duplicate keys
+fall back to the same libc `qsort` on the untouched original record sequence.
+The old `qsort` has no stable-tie contract: equal coordinates with different
+width/height/QP/mode/depth must not be silently assigned a new ordering. There is
+no new promise of stable sorting. Unique keys have a uniquely determined output;
+duplicates retain the old implementation's exact bytes rather than relying on
+the Web overlap validator to hide a changed result. Sorting and any scratch-tail
+writes finish before publication, in the existing single-threaded collector.
+
+`node scripts/test-analysis-sort.mjs BUILD_ROOT BASE_SOURCE REPORT_JSON` verifies
+88398 generated record cases against actual native and Emscripten `qsort`, using
+ASan/UBSan for the native run. It includes exhaustive small tied inputs, arbitrary
+non-key fields, exact/insufficient scratch capacity, maximum counts/geometry,
+integer/index boundaries, actual collector sealing and resource failures, and
+hard worker cancellation after maximum-size heap construction. A fresh worker
+then reruns the record checks. Test-only notification hooks/exports are absent
+from production builds. Compiled test executables stay outside uploaded evidence;
+only test logs and small numeric reports accompany the CI production artifact.
+The generated-media check compares the
+complete production ABI output and malformed-prefix behavior against the fixed
+PR base, including HEVC Main10; real H264/HEVC/VVC and full Chromium comparisons remain separate local
+evidence without uploading media or record payloads.
