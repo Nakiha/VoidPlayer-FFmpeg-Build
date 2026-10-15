@@ -26,7 +26,7 @@ jobs:
       - uses: mymindstorm/setup-emsdk@v14
         with:
           version: '6.0.9'
-          actions-cache-folder: emsdk-analysis-6.0.9
+          no-cache: true
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
@@ -39,16 +39,24 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
+          git status --porcelain > "$RUNNER_TEMP/evidence/candidate-source-status.txt"
+          test ! -s "$RUNNER_TEMP/evidence/candidate-source-status.txt"
           export ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-wasm-simd-v1"
           export ANALYSIS_DIST_ROOT="$RUNNER_TEMP/candidate"
           bash scripts/build-analysis.sh > "$RUNNER_TEMP/evidence/candidate-build.log" 2>&1
+          cp "$RUNNER_TEMP/candidate/manifest.json" "$RUNNER_TEMP/evidence/candidate-manifest.json"
+          cp "$RUNNER_TEMP/candidate/capabilities.json" "$RUNNER_TEMP/evidence/candidate-capabilities.json"
           node scripts/test-analysis-build-cache.mjs "$ANALYSIS_BUILD_ROOT"
           cp "$ANALYSIS_BUILD_ROOT/work/config.h" "$RUNNER_TEMP/evidence/config.h"
           git worktree add --detach "$RUNNER_TEMP/baseline-source" "$BASE_SHA"
+          git -C "$RUNNER_TEMP/baseline-source" status --porcelain > "$RUNNER_TEMP/evidence/baseline-source-status.txt"
+          test ! -s "$RUNNER_TEMP/evidence/baseline-source-status.txt"
           ANALYSIS_FFMPEG_SOURCE="$ANALYSIS_BUILD_ROOT/source" \
           ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-base" \
           ANALYSIS_DIST_ROOT="$RUNNER_TEMP/baseline" \
             bash "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh" > "$RUNNER_TEMP/evidence/baseline-build.log" 2>&1
+          cp "$RUNNER_TEMP/baseline/manifest.json" "$RUNNER_TEMP/evidence/baseline-manifest.json"
+          cp "$RUNNER_TEMP/baseline/capabilities.json" "$RUNNER_TEMP/evidence/baseline-capabilities.json"
       - name: Generate test patterns and compare complete ABI and failure behavior
         env:
           BASELINE_REVISION: ${{ github.event.pull_request.base.sha }}
