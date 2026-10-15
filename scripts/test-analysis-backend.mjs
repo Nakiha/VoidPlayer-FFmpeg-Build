@@ -5,6 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 const [baselineFile,candidateFile,reportFile,...files]=process.argv.slice(2);
 assert.ok(baselineFile&&candidateFile&&reportFile&&files.length);
 async function verifyArtifact(file,expectedRevision){
@@ -12,7 +13,7 @@ async function verifyArtifact(file,expectedRevision){
  assert.equal(manifest.dirty,false,'publishable artifact must come from a clean source checkout');
  if(expectedRevision)assert.equal(manifest.revision,expectedRevision);
  assert.equal(manifest.buildId,manifest.revision+':refs-'+sha256.slice(0,16));assert.equal(capabilities.revision,manifest.revision);assert.equal(capabilities.wasmSha256,sha256);assert.equal(manifest.ffmpegRevision,'c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e');assert.equal(manifest.threading,'single');assert.deepEqual(capabilities.registeredDemuxers,[]);assert.deepEqual(capabilities.registeredDecoders,['h264','hevc','vvc']);
- const create=(await import(pathToFileURL(path.resolve(file)).href)).default,core=await create();assert.ok(!Object.keys(core).some(k=>/^_vpa_profile|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production exports only');const p=core._vp_build_id(),end=core.HEAPU8.indexOf(0,p);assert.ok(p>0&&end>p&&end-p<=128);assert.equal(new TextDecoder().decode(core.HEAPU8.subarray(p,end)),manifest.revision);core._vpa_close();
+ const create=(await import(pathToFileURL(path.resolve(file)).href)).default,core=await create();assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production exports only');const p=core._vp_build_id(),end=core.HEAPU8.indexOf(0,p);assert.ok(p>0&&end>p&&end-p<=128);assert.equal(new TextDecoder().decode(core.HEAPU8.subarray(p,end)),manifest.revision);core._vpa_close();
  return {revision:manifest.revision,buildId:manifest.buildId,wasmSha256:sha256,dirty:manifest.dirty};
 }
 async function input(file){
@@ -25,7 +26,7 @@ async function input(file){
 async function run(moduleFile,source,{split=false,dropAnchor=false,corrupt=false}={}){
  const create=(await import(pathToFileURL(path.resolve(moduleFile)).href)).default,core=await create();
  assert.equal(core._vpa_abi(),1);assert.equal(core._vpa_reference_abi(),1);
- assert.ok(!Object.keys(core).some(k=>/^_vpa_profile|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production export surface');
+ assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production export surface');
  let opens=0,error=null;const records=[];
  const finish=()=>{const r=core._vpa_drain();if(r<0)return {phase:'drain',code:r};return steps(true);};
  function steps(eof=false){for(let n=0;n<4000;n++){const r=core._vpa_step();if(r<0)return {phase:'step',code:r};if(r===1){const count=core._vpa_count(),refs=core._vpa_ref_count();assert.ok(count>0&&count<=131072&&refs>=0&&refs<=64);const header=['ordinal','width','height','depth','invalid','picture_type','poc','count','ref_count','refs_invalid','record_bytes'].map(k=>core['_vpa_'+k]());header.push(core._vpa_pts());const bp=core._vpa_blocks(),rp=core._vpa_refs();assert.ok(Number.isSafeInteger(bp)&&bp>0&&bp+count*12<=core.HEAPU8.length);assert.ok(Number.isSafeInteger(rp)&&rp>=0&&rp+refs*8<=core.HEAPU8.length);const blocks=Buffer.from(core.HEAPU8.slice(bp,bp+count*12)),edges=Buffer.from(core.HEAPU8.slice(rp,rp+refs*8));assert.equal(blocks.length,count*12);assert.equal(edges.length,refs*8);records.push({header,blocks,edges,configuration:opens-1});assert.ok(core._vpa_take(8*1024*1024)>0);continue;}assert.equal(r,eof?2:0);return null;}throw Error('core made no bounded progress');}
@@ -41,5 +42,5 @@ async function run(moduleFile,source,{split=false,dropAnchor=false,corrupt=false
 const artifacts={baseline:await verifyArtifact(baselineFile,process.env.BASELINE_REVISION),candidate:await verifyArtifact(candidateFile,process.env.CANDIDATE_REVISION)};
 const report={artifacts,fixtureTools:execFileSync('ffmpeg',['-version'],{encoding:'utf8'}).split('\n')[0],inputs:[],checks:[]};
 for(const file of files){const source=await input(file);report.inputs.push({file:source.file,sha256:source.sha256,codec:source.codec,packets:source.packets.length});for(const [name,options] of [['whole',{}],['closed-boundary-reopen',{split:true}],['missing-anchor',{dropAnchor:true}],['corrupt-anchor',{corrupt:true}]]){
- const a=await run(baselineFile,source,options),b=await run(candidateFile,source,options);assert.deepEqual(b,a,`${source.file} ${name}: every header/block/ref byte and failure must match`);report.checks.push({fixture:source.file,name,opens:b.opens,pictures:b.records.length,error:b.error,retainedBytes:0});console.log(`PASS ${source.file} ${name}: ${b.records.length} outputs, ${b.opens} opens, ${JSON.stringify(b.error)}`);
+ const a=await run(baselineFile,source,options),b=await run(candidateFile,source,options);assert.ok(isDeepStrictEqual(b,a),`${source.file} ${name}: every header/block/ref byte and failure must match (raw records stay local)`);report.checks.push({fixture:source.file,name,opens:b.opens,pictures:b.records.length,error:b.error,retainedBytes:0});console.log(`PASS ${source.file} ${name}: ${b.records.length} outputs, ${b.opens} opens, ${JSON.stringify(b.error)}`);
  }}await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');

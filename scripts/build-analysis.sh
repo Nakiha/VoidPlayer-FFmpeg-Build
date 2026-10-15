@@ -22,6 +22,7 @@ git -C "$BUILD/source" checkout --detach "$REV"
 [[ "$(git -C "$BUILD/source" rev-parse HEAD:libavformat)" == 740392267b71cb9f0e6bd3b5b52173777b0d0939 ]] || { echo 'Demux compatibility tree mismatch' >&2; exit 1; }
 [[ "$(git -C "$BUILD/source" rev-parse HEAD:libavcodec/parser.c)" == cf5d65ee1699eb6a81f4da8df41edc6a503c5241 ]] || { echo 'Parser timing descriptor source mismatch' >&2; exit 1; }
 cp "$ROOT/analysis/stream.c" "$BUILD/source/libavcodec/voidplayer_vachunk.c"
+cp "$ROOT/analysis/voidplayer_block_sort.h" "$BUILD/source/libavcodec/voidplayer_block_sort.h"
 mkdir -p "$BUILD/work"
 cd "$BUILD/work"
 OPT="${ANALYSIS_OPT_LEVEL:-3}"
