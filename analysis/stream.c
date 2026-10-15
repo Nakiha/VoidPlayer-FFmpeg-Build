@@ -25,6 +25,9 @@ int vpa_execution_abi(void); int vpa_execution_mode(int mode); int vpa_execution
 #define MAX_PICTURES 32
 #define MAX_BLOCKS VPA_BLOCK_LIMIT
 #define MAX_RECORD_BYTES (32*1024*1024)
+#ifndef VP_ANALYSIS_H264_SKIP_LOOP_FILTER
+#define VP_ANALYSIS_H264_SKIP_LOOP_FILTER 1
+#endif
 typedef struct { uintptr_t id; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; uint32_t refs[128], ref_count; int refs_invalid, type, poc; } Picture;
 static Picture pictures[MAX_PICTURES];
 static AVCodecContext *decoder;
@@ -97,6 +100,12 @@ int vpa_open(int codec,const uint8_t *extra,int size){
     decoder->thread_count=1;decoder->thread_type=0;decoder->pkt_timebase=(AVRational){1,1000000};
     decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;decoder->err_recognition=AV_EF_EXPLODE|AV_EF_CAREFUL;
     decoder->max_pixels=4096*2304;
+#if VP_ANALYSIS_H264_SKIP_LOOP_FILTER
+    /* The H264 analysis hook already omits macroblock pixel reconstruction.
+     * Use the decoder's existing discard path: it preserves syntax/state,
+     * errors and loop_filter's row epilogue, without filtering unused pixels. */
+    if(id==AV_CODEC_ID_H264)decoder->skip_loop_filter=AVDISCARD_ALL;
+#endif
     if(size){decoder->extradata=av_mallocz(size+AV_INPUT_BUFFER_PADDING_SIZE);if(!decoder->extradata){vpa_close();return AVERROR(ENOMEM);}memcpy(decoder->extradata,extra,size);decoder->extradata_size=size;}
     AVDictionary *options=NULL;
     if(id==AV_CODEC_ID_HEVC&&execution_mode)av_dict_set_int(&options,"vp_analysis_mode",execution_mode,0);

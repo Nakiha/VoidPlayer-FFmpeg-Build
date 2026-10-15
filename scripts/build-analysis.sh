@@ -31,6 +31,8 @@ LTO="${ANALYSIS_LTO:-0}"
 [[ "$LTO" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_LTO'; exit 1; }
 HEVC_NO_PIXELS="${ANALYSIS_HEVC_NO_PIXELS:-1}"
 [[ "$HEVC_NO_PIXELS" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_HEVC_NO_PIXELS'; exit 1; }
+H264_SKIP_LOOP_FILTER="${ANALYSIS_H264_SKIP_LOOP_FILTER:-1}"
+[[ "$H264_SKIP_LOOP_FILTER" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_H264_SKIP_LOOP_FILTER'; exit 1; }
 CFLAGS="-msimd128 -DVP_ANALYSIS_ONLY=1 -DVP_HEVC_NO_PIXELS=$HEVC_NO_PIXELS"
 if [[ "$LTO" == 1 ]]; then CFLAGS="$CFLAGS -flto"; fi
 SIGNATURE="$REV:arch=wasm32:ffmpeg-simd128=1:execution=1:hevc-no-pixels=$HEVC_NO_PIXELS:demux=none:decoders=h264,hevc,vvc:parsers=h264,hevc,vvc:$OPT:$LTO:$(emcc --version | head -1)"
@@ -57,7 +59,8 @@ done
 make -j "${ANALYSIS_BUILD_JOBS:-4}"
 CORE_REV="$(git -C "$ROOT" rev-parse HEAD)"
 printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_REV" > "$BUILD/vp_core_build_id.h"
-emcc "-O$OPT" $CFLAGS -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/stream.c" "$ROOT/shared/vp_capabilities.c" -DVP_NO_CONTAINER_DEMUX -I "$BUILD/source" -I "$BUILD/work" \
+# This control changes the always-relinked collector, not cached FFmpeg objects.
+emcc "-O$OPT" $CFLAGS -DVP_ANALYSIS_H264_SKIP_LOOP_FILTER="$H264_SKIP_LOOP_FILTER" -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/stream.c" "$ROOT/shared/vp_capabilities.c" -DVP_NO_CONTAINER_DEMUX -I "$BUILD/source" -I "$BUILD/work" \
  libavcodec/libavcodec.a libavutil/libavutil.a \
  -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 \
  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=536870912 -s FILESYSTEM=0 \
@@ -65,8 +68,8 @@ emcc "-O$OPT" $CFLAGS -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/strea
  -o "$OUT/voidplayer-analysis.js"
 node "$ROOT/scripts/write-capabilities.mjs" "$OUT" analysis voidplayer-analysis "" "h264 hevc vvc"
 cp "$BUILD/source/COPYING.LGPLv2.1" "$OUT/LICENSE"
-python3 - "$ROOT" "$REV" "$OUT" "$OPT" "$LTO" "$HEVC_NO_PIXELS" <<'PY'
+python3 - "$ROOT" "$REV" "$OUT" "$OPT" "$LTO" "$HEVC_NO_PIXELS" "$H264_SKIP_LOOP_FILTER" <<'PY'
 import json,subprocess,sys,hashlib
-root,rev,out,opt,lto,hevc_no_pixels=sys.argv[1:]
-json.dump({'schema':1,'executionAbi':1,'hevcNoPixels':hevc_no_pixels=='1','optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True},'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','demuxAbi':0,'demuxers':[],'libraries':['avcodec','avutil'],'capabilityManifest':'capabilities.json','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
+root,rev,out,opt,lto,hevc_no_pixels,h264_skip_loop_filter=sys.argv[1:]
+json.dump({'schema':1,'h264SkipLoopFilter':h264_skip_loop_filter=='1','executionAbi':1,'hevcNoPixels':hevc_no_pixels=='1','optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True},'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','demuxAbi':0,'demuxers':[],'libraries':['avcodec','avutil'],'capabilityManifest':'capabilities.json','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
 PY

@@ -333,3 +333,13 @@ unsigned callback cannot represent signed Main10 QP. Web must retain null block
 QP/mean and `unsupported-qp-depth`, while keeping existing block/mode/reference
 semantics. Summary/range/viewport/legacy work stays full; only explicit precise
 blocks requests opt in. Playback and default execution remain unchanged.
+
+H.264 analysis already records macroblocks instead of reconstructing pixels. Its
+independent analysis context now also sets FFmpeg `skip_loop_filter=AVDISCARD_ALL`.
+The decoder still parses deblocking syntax and retains normal MB state, reference
+management, error flags and row completion; only unused filtering/cache/border
+work is omitted through FFmpeg's existing discard branch. This is incremental
+analysis, with no speculative GOP staging or new execution ABI. Playback sources
+and artifacts are unaffected. `ANALYSIS_H264_SKIP_LOOP_FILTER=0` provides a local
+A/B control; it changes the always-relinked collector, and the manifest records
+`h264SkipLoopFilter`. It does not change the cached FFmpeg compile configuration.
