@@ -51,7 +51,8 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/baseline-source" "$BASE_SHA"
           git -C "$RUNNER_TEMP/baseline-source" status --porcelain > "$RUNNER_TEMP/evidence/baseline-source-status.txt"
           test ! -s "$RUNNER_TEMP/evidence/baseline-source-status.txt"
-          ANALYSIS_FFMPEG_SOURCE="$ANALYSIS_BUILD_ROOT/source" \
+          # The shallow candidate clone may not contain the base's different pin.
+          ANALYSIS_FFMPEG_SOURCE="https://github.com/Nakiha/FFmpeg.git" \
           ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-base" \
           ANALYSIS_DIST_ROOT="$RUNNER_TEMP/baseline" \
             bash "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh" > "$RUNNER_TEMP/evidence/baseline-build.log" 2>&1
