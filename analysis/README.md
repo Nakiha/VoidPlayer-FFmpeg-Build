@@ -1,7 +1,7 @@
 # Independent bitstream analysis core (ABI 1)
 
 `bash scripts/build-analysis.sh` builds single-threaded `voidplayer-analysis.js`
-and `.wasm` from pinned instrumented FFmpeg `59196ee81d09cd5312acf7d3b3896ad530d1248b`.
+and `.wasm` from pinned instrumented FFmpeg `c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e`.
 The playback build and its collection settings do not change. License: LGPL-2.1-or-later.
 Build patches and collector live here; the Web repository only consumes the result.
 
@@ -44,3 +44,23 @@ active reference lists across slices, using decoder AVFrame COPY_OPAQUE IDs;
 they do not claim per-block usage. Unknown identities or >64 edges mark only
 references unsupported. Records live until take. Build manifests include the
 WASM hash in buildId and a dirty flag for unpublished local development.
+
+The analysis build selects FFmpeg's WASM architecture and existing SIMD128 HEVC
+IDCT/SAO backend. Compiler `-msimd128` alone does not select that backend:
+FFmpeg's `--disable-asm` also disables architecture C intrinsics. Effective
+`ARCH_WASM=1` and `HAVE_SIMD128=1` are required, including cached builds. The cache
+signature includes the backend identity; old work directories fail explicitly
+and require a fresh `ANALYSIS_BUILD_ROOT`. O3, no LTO and single threading stay
+unchanged by this configuration fix.
+
+The analysis-only PR check uses Emscripten 6.0.9 and Node 24, builds the exact PR
+head and base, and compares every output header/block/reference byte for synthetic
+H264/HEVC test patterns, including drain, reopen at a known closed encoder boundary (same extradata),
+and damaged-prefix rejection.
+The workflow records FFmpeg's generator version, encoder parameters and input
+hashes; it uploads evidence and core artifacts, never media. `testsrc2` is generated
+locally with no user or third-party audiovisual input. VVC is not claimed as CI
+coverage here: the separate local release check compares 49 VVC frames alongside
+180 HEVC and 30 H264 frames, without redistributing those local fixtures.
+Performance percentages belong to fixed-machine paired experiments, not CI
+thresholds or end-to-end application guarantees.

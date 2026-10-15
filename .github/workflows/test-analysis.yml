@@ -1,0 +1,85 @@
+name: Analysis WASM backend regression
+
+on:
+  pull_request:
+    branches: [wasm]
+    paths:
+      - '.github/workflows/test-analysis.yml'
+      - 'analysis/**'
+      - 'shared/vp_capabilities.c'
+      - 'scripts/build-analysis.sh'
+      - 'scripts/write-capabilities.mjs'
+      - 'scripts/test-analysis-*.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '6.0.9'
+          no-cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: Install synthetic fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg zip
+      - name: Build exact-head analysis and fixed PR-base comparator
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          git status --porcelain > "$RUNNER_TEMP/evidence/candidate-source-status.txt"
+          test ! -s "$RUNNER_TEMP/evidence/candidate-source-status.txt"
+          export ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-wasm-simd-v1"
+          export ANALYSIS_DIST_ROOT="$RUNNER_TEMP/candidate"
+          bash scripts/build-analysis.sh > "$RUNNER_TEMP/evidence/candidate-build.log" 2>&1
+          cp "$RUNNER_TEMP/candidate/manifest.json" "$RUNNER_TEMP/evidence/candidate-manifest.json"
+          cp "$RUNNER_TEMP/candidate/capabilities.json" "$RUNNER_TEMP/evidence/candidate-capabilities.json"
+          node scripts/test-analysis-build-cache.mjs "$ANALYSIS_BUILD_ROOT"
+          cp "$ANALYSIS_BUILD_ROOT/work/config.h" "$RUNNER_TEMP/evidence/config.h"
+          git worktree add --detach "$RUNNER_TEMP/baseline-source" "$BASE_SHA"
+          git -C "$RUNNER_TEMP/baseline-source" status --porcelain > "$RUNNER_TEMP/evidence/baseline-source-status.txt"
+          test ! -s "$RUNNER_TEMP/evidence/baseline-source-status.txt"
+          ANALYSIS_FFMPEG_SOURCE="$ANALYSIS_BUILD_ROOT/source" \
+          ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-base" \
+          ANALYSIS_DIST_ROOT="$RUNNER_TEMP/baseline" \
+            bash "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh" > "$RUNNER_TEMP/evidence/baseline-build.log" 2>&1
+          cp "$RUNNER_TEMP/baseline/manifest.json" "$RUNNER_TEMP/evidence/baseline-manifest.json"
+          cp "$RUNNER_TEMP/baseline/capabilities.json" "$RUNNER_TEMP/evidence/baseline-capabilities.json"
+      - name: Generate test patterns and compare complete ABI and failure behavior
+        env:
+          BASELINE_REVISION: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_REVISION: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/fixtures"
+          ffmpeg -version > "$RUNNER_TEMP/evidence/fixture-tools.txt"
+          cp .github/workflows/test-analysis.yml "$RUNNER_TEMP/evidence/generator-workflow.yml"
+          ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 60 -c:v libx264 -pix_fmt yuv420p \
+            -x264-params 'threads=1:keyint=30:min-keyint=30:scenecut=0:open-gop=0:bframes=2' "$RUNNER_TEMP/fixtures/h264.mp4"
+          ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 180 -c:v libx265 -pix_fmt yuv420p -tag:v hvc1 \
+            -x265-params 'pools=none:frame-threads=1:keyint=60:min-keyint=60:scenecut=0:open-gop=0:bframes=3:log-level=error' "$RUNNER_TEMP/fixtures/hevc.mp4"
+          node scripts/test-analysis-backend.mjs "$RUNNER_TEMP/baseline/voidplayer-analysis.js" \
+            "$RUNNER_TEMP/candidate/voidplayer-analysis.js" "$RUNNER_TEMP/evidence/oracle.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4"
+          cd "$RUNNER_TEMP/candidate"
+          sha256sum * > "$RUNNER_TEMP/evidence/members.sha256"
+          zip -X "$RUNNER_TEMP/analysis-${{ github.event.pull_request.head.sha }}.zip" ./*
+          sha256sum "$RUNNER_TEMP/analysis-${{ github.event.pull_request.head.sha }}.zip" > "$RUNNER_TEMP/evidence/archive.sha256"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/analysis-*.zip
+          if-no-files-found: error
