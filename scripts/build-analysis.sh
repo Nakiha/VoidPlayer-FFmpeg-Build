@@ -30,19 +30,27 @@ LTO="${ANALYSIS_LTO:-0}"
 [[ "$LTO" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_LTO'; exit 1; }
 CFLAGS="-msimd128"
 if [[ "$LTO" == 1 ]]; then CFLAGS="$CFLAGS -flto"; fi
-SIGNATURE="$REV:demux=none:decoders=h264,hevc,vvc:parsers=h264,hevc,vvc:$OPT:$LTO:$(emcc --version | head -1)"
+SIGNATURE="$REV:arch=wasm32:ffmpeg-simd128=1:demux=none:decoders=h264,hevc,vvc:parsers=h264,hevc,vvc:$OPT:$LTO:$(emcc --version | head -1)"
 if [[ -f config.h && "$(cat .analysis-build-signature 2>/dev/null || true)" != "$SIGNATURE" ]]; then
   echo 'Analysis build inputs changed; select a fresh ANALYSIS_BUILD_ROOT.' >&2; exit 1
 fi
 if [[ ! -f config.h ]]; then
 emconfigure "$BUILD/source/configure" --cc=emcc --cxx=em++ --ar=emar --ranlib=emranlib --nm=emnm \
- --target-os=none --arch=x86_32 --cpu=generic --enable-cross-compile --disable-asm --disable-stripping \
+ --target-os=none --arch=wasm32 --cpu=generic --enable-cross-compile --disable-stripping \
  --disable-programs --disable-doc --disable-debug --disable-avdevice --disable-avfilter --disable-swresample \
  --disable-swscale --disable-avformat --disable-network --disable-everything --disable-autodetect \
  --disable-pthreads --disable-w32threads --disable-os2threads --enable-avcodec --enable-avutil \
  --enable-decoder=h264,hevc,vvc --enable-parser=h264,hevc,vvc --optflags="-O$OPT" --extra-cflags="$CFLAGS"
 printf '%s\n' "$SIGNATURE" > .analysis-build-signature
 fi
+# FFmpeg's --disable-asm also disables the WASM C-intrinsics backend.
+# Check the effective config, including when an existing work directory is used.
+for VP_ANALYSIS_FEATURE in ARCH_WASM HAVE_SIMD128; do
+  if ! grep -Eq "^#define ${VP_ANALYSIS_FEATURE} 1$" config.h; then
+    echo "Analysis backend missing ${VP_ANALYSIS_FEATURE}; select a fresh ANALYSIS_BUILD_ROOT." >&2
+    exit 1
+  fi
+done
 make -j "${ANALYSIS_BUILD_JOBS:-4}"
 CORE_REV="$(git -C "$ROOT" rev-parse HEAD)"
 printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_REV" > "$BUILD/vp_core_build_id.h"
