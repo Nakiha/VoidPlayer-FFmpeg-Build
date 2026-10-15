@@ -326,3 +326,10 @@ from 2.90 MB to 1.34 MB but increased HEVC/VVC target-picture latency by about
 is enabled by default. These observations are workload-specific, not browser
 performance guarantees; rerun correctness and playback benchmarks before
 changing defaults. HTTP precompression belongs to the consuming web server.
+
+Main10 uses the same execution ABI1 and retry contract under strict 10-bit
+4:2:0 Main10 admission. It does not add a QP capability: the existing clipped
+unsigned callback cannot represent signed Main10 QP. Web must retain null block
+QP/mean and `unsupported-qp-depth`, while keeping existing block/mode/reference
+semantics. Summary/range/viewport/legacy work stays full; only explicit precise
+blocks requests opt in. Playback and default execution remain unchanged.

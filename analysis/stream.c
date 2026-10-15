@@ -117,7 +117,8 @@ int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known
 int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal){return vpa_feed_known(bytes,size,pts,dts,3,ordinal);}
 int vpa_drain(void){if(!decoder)return AVERROR(EINVAL);int ret=avcodec_send_packet(decoder,NULL);return ret==AVERROR(EAGAIN)?2:ret;}
 /* Successful decoder output is picture-complete for the single-thread build.
- * Refuse field/multilayer/invalid frames and clipped negative/high-depth QP. */
+ * Mark corrupt/field frames invalid. Legacy CU QP bytes remain clipped unsigned
+ * values; consumers retain unsupported/null QP for high-depth output. */
 int vpa_step(void){
     if(!decoder)return AVERROR(EINVAL);if(failure)return failure;if(ready)return 1;
     int ret=avcodec_receive_frame(decoder,frame);if(ret==AVERROR(EAGAIN))return 0;if(ret==AVERROR_EOF)return 2;if(ret<0)return ret;
