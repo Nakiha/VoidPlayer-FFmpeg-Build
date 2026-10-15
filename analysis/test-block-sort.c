@@ -14,7 +14,8 @@ static void cancel_test_heap_enter(void);
 static const Block *original;
 static unsigned calls,tests;
 static uint32_t random_state=0x58ac3901;
-static uint32_t random32(void) { random_state^=random_state<<13;random_state^=random_state>>17;random_state^=random_state<<5;return random_state; }
+static uint32_t next_random32(uint32_t *state) { *state^=*state<<13;*state^=*state>>17;*state^=*state<<5;return *state; }
+static uint32_t random32(void) { return next_random32(&random_state); }
 static void checked_qsort(void *base,size_t n,size_t width,int (*cmp)(const void *,const void *)) {
     /* A tie fallback must see the untouched original, not a sorted permutation. */
     assert(width==12&&memcmp(base,original,n*width)==0);calls++;
@@ -37,6 +38,32 @@ static void check(Block *input,uint32_t n,uint32_t capacity,uint32_t w,uint32_t 
 static Block record(uint32_t key,uint32_t serial) {
     return (Block){(key%1024)*4,(key/1024)*4,(serial%255)+1,((serial*13)%255)+1,
                    (int16_t)(serial*7919),serial*17,serial*31};
+}
+static void shuffle_maximum(Block *blocks,uint32_t n) {
+    /* Independent of earlier fuzz consumption; both maximum-size variants
+     * replay the same seed's Fisher-Yates algorithm for their own length. */
+    const uint32_t seed=0x6e624eb7u;
+    uint32_t state=seed;
+    for(uint32_t i=n;i>1;i--) {
+        const uint32_t j=next_random32(&state)%i;
+        Block value=blocks[i-1];blocks[i-1]=blocks[j];blocks[j]=value;
+    }
+    unsigned char *seen=calloc(n,1);assert(seen);
+    uint32_t moved=0,rises=0,falls=0,fingerprint=2166136261u;
+    for(uint32_t i=0;i<n;i++) {
+        assert(!((blocks[i].x|blocks[i].y)&3));
+        const uint32_t key=(uint32_t)(blocks[i].y/4)*1024+blocks[i].x/4;
+        assert(key<n&&!seen[key]);seen[key]=1;
+        const Block expected=record(key,key);
+        assert(memcmp(&blocks[i],&expected,sizeof(Block))==0);
+        moved+=key!=i;
+        if(i){rises+=vpa_block_key(&blocks[i-1])<vpa_block_key(&blocks[i]);falls+=vpa_block_key(&blocks[i-1])>vpa_block_key(&blocks[i]);}
+        fingerprint=(fingerprint^key)*16777619u;
+    }
+    for(uint32_t i=0;i<n;i++)assert(seen[i]);
+    assert(moved>n/2&&rises&&falls); /* Neither sorted, reversed nor a token swap. */
+    free(seen);
+    printf("maximum shuffle: n=%u seed=%08x fingerprint=%08x moved=%u rises=%u falls=%u\n",n,seed,fingerprint,moved,rises,falls);
 }
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -98,8 +125,11 @@ int main(void) {
     for(unsigned mode=0;mode<4;mode++)for(unsigned full=0;full<2;full++) {
         uint32_t n=full?VPA_BLOCK_LIMIT:VPA_BLOCK_LIMIT-6144;
         for(uint32_t i=0;i<n;i++)large[i]=record(mode==3?0:i,i);
-        if(mode==1)for(uint32_t i=0;i<n/2;i++){Block v=large[i];large[i]=large[n-i-1];large[n-i-1]=v;}
-        if(mode==2)for(uint32_t i=n;i>1;i--){uint32_t j=random32()%i;Block v=large[i-1];large[i-1]=large[j];large[j]=v;}
+        if(mode==1) {
+            for(uint32_t i=0;i<n/2;i++){Block v=large[i];large[i]=large[n-i-1];large[n-i-1]=v;}
+            for(uint32_t i=0;i<n;i++){const Block expected=record(n-i-1,n-i-1);assert(memcmp(&large[i],&expected,sizeof(Block))==0);}
+        }
+        if(mode==2)shuffle_maximum(large,n);
         check(large,n,VPA_BLOCK_LIMIT,4096,2304,mode==0?0:full||mode==3?1:0);
     }
     /* Reject count/capacity/index arithmetic overflow before touching a pointer. */

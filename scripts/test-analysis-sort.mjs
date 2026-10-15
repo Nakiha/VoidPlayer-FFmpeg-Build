@@ -21,8 +21,15 @@ const report={node:process.version,baselineRevision:run('git',['-C',baseline,'re
 const source=path.join(root,'analysis/test-block-sort.c'),native=path.join(output,'sort-native');
 run(process.env.CC??'cc',['-std=c11','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',source,'-o',native]);
 const nativeLog=run(native,[]);await writeFile(path.join(logsDirectory,'native.log'),nativeLog);
-assert.match(nativeLog,/PASS block-sort: 88398 byte-exact cases/);report.checks.push({name:'native-ASan-UBSan',cases:88398});
-const flags=['-O2','-sMODULARIZE=1','-sEXPORT_ES6=1','-sENVIRONMENT=node,worker','-sALLOW_MEMORY_GROWTH=1','-sSTACK_SIZE=4194304','-sINITIAL_MEMORY=67108864','-sMAXIMUM_MEMORY=536870912','-sFILESYSTEM=0'];
+assert.match(nativeLog,/PASS block-sort: 88398 byte-exact cases/);report.checks.push({name:'native-ASan-UBSan',optimization:'O1',cases:88398});
+const shuffles=log=>log.split('\n').filter(line=>line.startsWith('maximum shuffle:'));
+assert.equal(shuffles(nativeLog).length,2,'both maximum lengths exercise seeded permutations');
+const optimizedNative=path.join(output,'sort-native-O3');
+run(process.env.CC??'cc',['-std=c11','-O3',source,'-o',optimizedNative]);
+const optimizedLog=run(optimizedNative,[]);await writeFile(path.join(logsDirectory,'native-O3.log'),optimizedLog);
+assert.match(optimizedLog,/PASS block-sort: 88398 byte-exact cases/);report.checks.push({name:'native-O3',optimization:'O3',cases:88398});
+assert.deepEqual(shuffles(optimizedLog),shuffles(nativeLog),'native O1/O3 replay identical maximum permutations');
+const flags=['-O3','-msimd128','-sMODULARIZE=1','-sEXPORT_ES6=1','-sENVIRONMENT=node,worker','-sALLOW_MEMORY_GROWTH=1','-sSTACK_SIZE=4194304','-sINITIAL_MEMORY=67108864','-sMAXIMUM_MEMORY=536870912','-sFILESYSTEM=0'];
 const sortFile=path.join(output,'sort-tests.mjs');
 run('emcc',[source,...flags,'-sEXPORTED_FUNCTIONS=["_main","_vpa_sort_cancel_work"]','-o',sortFile]);
 async function main(file,label){
@@ -31,18 +38,23 @@ async function main(file,label){
  assert.equal(core._main(),0);const log=logs.join('\n')+'\n';await writeFile(path.join(logsDirectory,label+'.log'),log);
  assert.match(log,/PASS /);return log.trim();
 }
-assert.match(await main(sortFile,'wasm-sort'),/88398 byte-exact cases/);
-report.checks.push({name:'Emscripten-libc-byte-exact-sort',cases:88398,wasmSha256:await hash(path.join(output,'sort-tests.wasm'))});
+const wasmLog=await main(sortFile,'wasm-sort');assert.match(wasmLog,/88398 byte-exact cases/);
+assert.deepEqual(shuffles(wasmLog),shuffles(nativeLog),'WASM O3 replays the same seeded maximum permutations');
+report.maximumShuffleEvidence=shuffles(wasmLog);
+report.checks.push({name:'Emscripten-libc-byte-exact-sort',optimization:'O3',simd128:true,cases:88398,wasmSha256:await hash(path.join(output,'sort-tests.wasm'))});
 const includes=['-I',path.join(build,'source'),'-I',path.join(build,'work')];
 const archives=[path.join(build,'work/libavcodec/libavcodec.a'),path.join(build,'work/libavutil/libavutil.a')];
+const collectorResults={};
 for(const [label,collector] of [['baseline',path.join(baseline,'analysis/stream.c')],['candidate',path.join(root,'analysis/stream.c')]]){
  const file=path.join(output,'collector-'+label+'.mjs');
  run('emcc',[path.join(root,'analysis/test-collector-limits.c'),`-DVPA_TEST_COLLECTOR=${JSON.stringify(collector)}`,...includes,...archives,...flags,'-Wl,--wrap=avcodec_receive_frame','-sEXPORTED_FUNCTIONS=["_main"]','-o',file]);
- report.checks.push({name:'actual-collector-'+label,result:await main(file,'collector-'+label)});
+ collectorResults[label]=await main(file,'collector-'+label);
+ report.checks.push({name:'actual-collector-'+label,optimization:'O3',simd128:true,result:collectorResults[label]});
 }
-assert.equal(report.checks[2].result,report.checks[3].result,'identical collector budget/retention behavior');
-// Kill an owned worker while it is exercising maximum-size eligible heaps.
-// C remains synchronous; production cancellation still destroys the worker.
+assert.equal(collectorResults.baseline,collectorResults.candidate,'identical collector budget/retention behavior');
+// Terminate an owned worker after maximum-size heap construction. C remains
+// synchronous. This proves neither an interrupt inside C nor a production
+// cancellation-latency bound; the startup watchdog is only a test timeout.
 const code=`import {parentPort} from 'node:worker_threads';
  import create from ${JSON.stringify(pathToFileURL(sortFile).href)};
  globalThis.__sortCancelStarted=()=>parentPort.postMessage({event:'sort-started'});
@@ -54,14 +66,16 @@ try{
  await new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('sort worker did not start')),5000);worker.on('error',reject);worker.on('message',message=>{messages.push(message);if(message.event==='sort-started')resolve();});});
  clearTimeout(timer);const exit=await worker.terminate();assert.notEqual(exit,0);
  assert.deepEqual(messages,[{event:'sort-started'}],'cancelled sort publishes no completion');
- report.checks.push({name:'maximum-sort-worker-hard-cancel',exit,completionPublished:false});
+ report.checks.push({name:'maximum-sort-worker-hard-cancel',optimization:'O3',simd128:true,phase:'after-heap-construction',exit,completionPublished:false,productionLatencyGuarantee:false});
 }finally{clearTimeout(timer);await worker.terminate();}
 const freshCode=`import {parentPort} from 'node:worker_threads';import create from ${JSON.stringify(pathToFileURL(sortFile).href)};const c=await create({noInitialRun:true,print:()=>{}});parentPort.postMessage({result:c._main()});`;
 const fresh=new Worker(new URL('data:text/javascript;base64,'+Buffer.from(freshCode).toString('base64')));
 try{
  const result=await new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('fresh-worker unit timeout')),30000);fresh.once('error',reject);fresh.once('message',resolve);});
- assert.deepEqual(result,{result:0});report.checks.push({name:'fresh-worker-after-cancellation',cases:88398});
+ assert.deepEqual(result,{result:0});report.checks.push({name:'fresh-worker-after-cancellation',optimization:'O3',simd128:true,cases:88398});
 }finally{clearTimeout(timer);await fresh.terminate();}
 report.sortHeaderSha256=await hash(path.join(root,'analysis/voidplayer_block_sort.h'));
+report.testSourceSha256=await hash(source);
+report.driverSha256=await hash(import.meta.filename);
 await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');
 console.log('PASS analysis sort, collector budgets, unchanged tie bytes and worker cancellation');
