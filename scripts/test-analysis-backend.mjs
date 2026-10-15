@@ -8,11 +8,12 @@ import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 const [baselineFile,candidateFile,reportFile,...files]=process.argv.slice(2);
 assert.ok(baselineFile&&candidateFile&&reportFile&&files.length);
-async function verifyArtifact(file,expectedRevision){
+const pinnedFfmpeg=(await readFile(new URL('build-analysis.sh',import.meta.url),'utf8')).match(/^REV=([a-f0-9]{40})$/m)[1];
+async function verifyArtifact(file,expectedRevision,expectedFfmpeg){
  const directory=path.dirname(path.resolve(file)),manifest=JSON.parse(await readFile(path.join(directory,'manifest.json'))),capabilities=JSON.parse(await readFile(path.join(directory,'capabilities.json'))),wasm=await readFile(path.join(directory,'voidplayer-analysis.wasm')),sha256=createHash('sha256').update(wasm).digest('hex');
  assert.equal(manifest.dirty,false,'publishable artifact must come from a clean source checkout');
  if(expectedRevision)assert.equal(manifest.revision,expectedRevision);
- assert.equal(manifest.buildId,manifest.revision+':refs-'+sha256.slice(0,16));assert.equal(capabilities.revision,manifest.revision);assert.equal(capabilities.wasmSha256,sha256);assert.equal(manifest.ffmpegRevision,'c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e');assert.equal(manifest.threading,'single');assert.deepEqual(capabilities.registeredDemuxers,[]);assert.deepEqual(capabilities.registeredDecoders,['h264','hevc','vvc']);
+ assert.equal(manifest.buildId,manifest.revision+':refs-'+sha256.slice(0,16));assert.equal(capabilities.revision,manifest.revision);assert.equal(capabilities.wasmSha256,sha256);assert.equal(manifest.ffmpegRevision,expectedFfmpeg);assert.equal(manifest.threading,'single');assert.deepEqual(capabilities.registeredDemuxers,[]);assert.deepEqual(capabilities.registeredDecoders,['h264','hevc','vvc']);
  const create=(await import(pathToFileURL(path.resolve(file)).href)).default,core=await create();assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production exports only');const p=core._vp_build_id(),end=core.HEAPU8.indexOf(0,p);assert.ok(p>0&&end>p&&end-p<=128);assert.equal(new TextDecoder().decode(core.HEAPU8.subarray(p,end)),manifest.revision);core._vpa_close();
  return {revision:manifest.revision,buildId:manifest.buildId,wasmSha256:sha256,dirty:manifest.dirty};
 }
@@ -39,7 +40,7 @@ async function run(moduleFile,source,{split=false,dropAnchor=false,corrupt=false
  else{assert.equal(error,null);assert.equal(records.length,source.packets.length);assert.equal(new Set(records.map(r=>r.header[0])).size,records.length);for(const r of records){assert.equal(r.header[4],0);assert.equal(r.header[9],0);assert.equal(r.header[11],source.packets[r.header[0]].pts);for(let i=0;i<r.edges.length;i+=8){assert.ok(r.edges.readUInt32LE(i)<r.header[0]);assert.ok(r.edges.readUInt32LE(i+4)<=1);}}if(split)assert.equal(opens,2);}
  return {opens,error,records};
 }
-const artifacts={baseline:await verifyArtifact(baselineFile,process.env.BASELINE_REVISION),candidate:await verifyArtifact(candidateFile,process.env.CANDIDATE_REVISION)};
+const artifacts={baseline:await verifyArtifact(baselineFile,process.env.BASELINE_REVISION,process.env.BASELINE_FFMPEG_REVISION??'c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e'),candidate:await verifyArtifact(candidateFile,process.env.CANDIDATE_REVISION,pinnedFfmpeg)};
 const report={artifacts,fixtureTools:execFileSync('ffmpeg',['-version'],{encoding:'utf8'}).split('\n')[0],inputs:[],checks:[]};
 for(const file of files){const source=await input(file);report.inputs.push({file:source.file,sha256:source.sha256,codec:source.codec,packets:source.packets.length});for(const [name,options] of [['whole',{}],['closed-boundary-reopen',{split:true}],['missing-anchor',{dropAnchor:true}],['corrupt-anchor',{corrupt:true}]]){
  const a=await run(baselineFile,source,options),b=await run(candidateFile,source,options);assert.ok(isDeepStrictEqual(b,a),`${source.file} ${name}: every header/block/ref byte and failure must match (raw records stay local)`);report.checks.push({fixture:source.file,name,opens:b.opens,pictures:b.records.length,error:b.error,retainedBytes:0});console.log(`PASS ${source.file} ${name}: ${b.records.length} outputs, ${b.opens} opens, ${JSON.stringify(b.error)}`);

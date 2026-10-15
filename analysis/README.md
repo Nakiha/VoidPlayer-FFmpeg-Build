@@ -92,3 +92,32 @@ The generated-media check compares the
 complete production ABI output and malformed-prefix behavior against the fixed
 PR base, including HEVC Main10; real H264/HEVC/VVC and full Chromium comparisons remain separate local
 evidence without uploading media or record payloads.
+
+## HEVC execution extension v1
+
+The optional `_vpa_execution_abi()`/`_vpa_execution_mode(0|1)` extension requests
+full (default) or eligible Main8 no-pixels execution before `_vpa_open`.
+`_vpa_execution_path()` reports the selected path; `_vpa_execution_reason()`
+reports full/retry provenance. `_vpa_execution_retry_code()` is the fixed
+FFERRTAG(V,P,R,F), not a host errno. Block ABI1/reference ABI1, record layout,
+limits, Main10 QP semantics and the semantic analysis recipe are unchanged.
+Older clients stay full; clients without the extension stay full. Artifacts
+expose executionAbi=1 and hevcNoPixels, with exact source/WASM build identity.
+
+Only independent analysis compiles VP_ANALYSIS_ONLY=1. Source admission and
+late retry boundaries are documented in the pinned FFmpeg
+`doc/voidplayer-analysis.md`. The client must discard unpublished attempt results
+and rebuild a fresh full decoder from the proven index anchor, at most once per
+request. It must not resume reconstruction in the pruned DPB or retry generic
+resource/corrupt/cancellation errors. Web supplies that transaction.
+
+`ANALYSIS_HEVC_NO_PIXELS=0` builds a full-path control using the same source and
+execution ABI for serial paired measurements; select a fresh build root because
+the feature is part of the cache signature. Playback build flags/pins are unchanged.
+CI additionally checks synthetic late parameter/hash/grain retry, malformed PS
+classification, fresh full replay bytes, and Main10/lossless initial full selection.
+
+This branch is stacked on unmerged sorter PR9 (a6bb9b13). The new FFmpeg pin
+must be published/reviewed before this Core branch can build from its public URL;
+local validation uses an explicit ANALYSIS_FFMPEG_SOURCE checkout. Web pins must
+only move after the upstream sources/artifact are available.

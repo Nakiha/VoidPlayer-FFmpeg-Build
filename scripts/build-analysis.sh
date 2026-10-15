@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${ANALYSIS_BUILD_ROOT:-$ROOT/.build/analysis}"
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
-REV=c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e
+REV=3be8ba822ba37d45e528a044e328253d38598d18
 VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi
@@ -29,9 +29,11 @@ OPT="${ANALYSIS_OPT_LEVEL:-3}"
 LTO="${ANALYSIS_LTO:-0}"
 [[ "$OPT" =~ ^(2|3|s|z)$ ]] || { echo 'Invalid ANALYSIS_OPT_LEVEL'; exit 1; }
 [[ "$LTO" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_LTO'; exit 1; }
-CFLAGS="-msimd128"
+HEVC_NO_PIXELS="${ANALYSIS_HEVC_NO_PIXELS:-1}"
+[[ "$HEVC_NO_PIXELS" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_HEVC_NO_PIXELS'; exit 1; }
+CFLAGS="-msimd128 -DVP_ANALYSIS_ONLY=1 -DVP_HEVC_NO_PIXELS=$HEVC_NO_PIXELS"
 if [[ "$LTO" == 1 ]]; then CFLAGS="$CFLAGS -flto"; fi
-SIGNATURE="$REV:arch=wasm32:ffmpeg-simd128=1:demux=none:decoders=h264,hevc,vvc:parsers=h264,hevc,vvc:$OPT:$LTO:$(emcc --version | head -1)"
+SIGNATURE="$REV:arch=wasm32:ffmpeg-simd128=1:execution=1:hevc-no-pixels=$HEVC_NO_PIXELS:demux=none:decoders=h264,hevc,vvc:parsers=h264,hevc,vvc:$OPT:$LTO:$(emcc --version | head -1)"
 if [[ -f config.h && "$(cat .analysis-build-signature 2>/dev/null || true)" != "$SIGNATURE" ]]; then
   echo 'Analysis build inputs changed; select a fresh ANALYSIS_BUILD_ROOT.' >&2; exit 1
 fi
@@ -59,12 +61,12 @@ emcc "-O$OPT" $CFLAGS -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/strea
  libavcodec/libavcodec.a libavutil/libavutil.a \
  -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 \
  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=536870912 -s FILESYSTEM=0 \
- -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vp_capability_abi","_vp_build_id","_vp_demuxer_count","_vp_demuxer_name","_vp_decoder_count","_vp_decoder_name"]' \
+ -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_execution_abi","_vpa_execution_mode","_vpa_execution_path","_vpa_execution_reason","_vpa_execution_retry_code","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vp_capability_abi","_vp_build_id","_vp_demuxer_count","_vp_demuxer_name","_vp_decoder_count","_vp_decoder_name"]' \
  -o "$OUT/voidplayer-analysis.js"
 node "$ROOT/scripts/write-capabilities.mjs" "$OUT" analysis voidplayer-analysis "" "h264 hevc vvc"
 cp "$BUILD/source/COPYING.LGPLv2.1" "$OUT/LICENSE"
-python3 - "$ROOT" "$REV" "$OUT" "$OPT" "$LTO" <<'PY'
+python3 - "$ROOT" "$REV" "$OUT" "$OPT" "$LTO" "$HEVC_NO_PIXELS" <<'PY'
 import json,subprocess,sys,hashlib
-root,rev,out,opt,lto=sys.argv[1:]
-json.dump({'schema':1,'optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True},'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','demuxAbi':0,'demuxers':[],'libraries':['avcodec','avutil'],'capabilityManifest':'capabilities.json','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
+root,rev,out,opt,lto,hevc_no_pixels=sys.argv[1:]
+json.dump({'schema':1,'executionAbi':1,'hevcNoPixels':hevc_no_pixels=='1','optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True},'buildId':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip()+':refs-'+hashlib.sha256(open(out+'/voidplayer-analysis.wasm','rb').read()).hexdigest()[:16],'referenceAbi':1,'dirty':bool(subprocess.check_output(['git','-C',root,'status','--porcelain'],text=True).strip()),'abi':1,'semanticVersion':'0.1.0','demuxAbi':0,'demuxers':[],'libraries':['avcodec','avutil'],'capabilityManifest':'capabilities.json','repository':'Nakiha/VoidPlayer-FFmpeg-Build','revision':subprocess.check_output(['git','-C',root,'rev-parse','HEAD'],text=True).strip(),'ffmpegRepository':'Nakiha/FFmpeg','ffmpegRevision':rev,'emscripten':subprocess.check_output(['emcc','--version'],text=True).splitlines()[0],'threading':'single','heapMaxBytes':536870912,'recordMaxBytes':33554432,'pictureMaxBlocks':131072,'license':'LGPL-2.1-or-later'},open(out+'/manifest.json','w'),indent=2)
 PY

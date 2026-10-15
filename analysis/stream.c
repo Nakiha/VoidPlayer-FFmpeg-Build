@@ -8,6 +8,8 @@
 #include "voidplayer_block_sort.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/voidplayer_vachunk.h"
+#include "libavcodec/voidplayer_analysis.h"
+#include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/error.h"
 #include "libavutil/mem.h"
@@ -19,6 +21,7 @@ int vpa_depth(void); int vpa_ordinal(void); int vpa_width(void); int vpa_height(
 double vpa_pts(void); int vpa_take(int maxBytes); int vpa_record_bytes(void);
 void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list);
 int vpa_reference_abi(void); int vpa_ref_count(void); int vpa_refs(void); int vpa_refs_invalid(void); int vpa_picture_type(void); int vpa_poc(void);
+int vpa_execution_abi(void); int vpa_execution_mode(int mode); int vpa_execution_path(void); int vpa_execution_reason(void); int vpa_execution_retry_code(void);
 #define MAX_PICTURES 32
 #define MAX_BLOCKS VPA_BLOCK_LIMIT
 #define MAX_RECORD_BYTES (32*1024*1024)
@@ -29,6 +32,7 @@ static AVFrame *frame;
 static size_t allocated;
 static int failure;
 static Picture *ready;
+static int execution_mode;
 static Picture *find(uintptr_t id,int create) {
     if (!id) { failure=AVERROR_INVALIDDATA; return NULL; }
     for(int i=0;i<MAX_PICTURES;i++) if(pictures[i].id==id) return &pictures[i];
@@ -77,7 +81,13 @@ int ff_voidplayer_vachunk_write_frame_summary(const VoidPlayerVachunkFrameInfo *
 uint32_t ff_voidplayer_vachunk_frame_count(void){return 0;}
 uint32_t ff_voidplayer_vachunk_last_frame_cu_count(void){return 0;}
 int vpa_abi(void){return 1;}
-void vpa_close(void){ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);avcodec_free_context(&decoder);failure=0;}
+void vpa_close(void){ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);avcodec_free_context(&decoder);failure=0;execution_mode=0;}
+int vpa_execution_abi(void){return 1;}
+int vpa_execution_retry_code(void){return VP_ANALYSIS_RETRY_FULL;}
+int vpa_execution_mode(int mode){if(decoder)return AVERROR(EBUSY);if(mode<0||mode>1)return AVERROR(EINVAL);execution_mode=mode;return 0;}
+static int execution_value(const char *name){int64_t value=0;if(decoder&&decoder->codec_id==AV_CODEC_ID_HEVC)av_opt_get_int(decoder->priv_data,name,0,&value);return (int)value;}
+int vpa_execution_path(void){return execution_value("vp_analysis_path");}
+int vpa_execution_reason(void){return execution_value("vp_analysis_reason");}
 int vpa_open(int codec,const uint8_t *extra,int size){
     if(decoder)return AVERROR(EBUSY);
     if(size<0||size>1024*1024)return AVERROR(EINVAL);
@@ -88,7 +98,11 @@ int vpa_open(int codec,const uint8_t *extra,int size){
     decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;decoder->err_recognition=AV_EF_EXPLODE|AV_EF_CAREFUL;
     decoder->max_pixels=4096*2304;
     if(size){decoder->extradata=av_mallocz(size+AV_INPUT_BUFFER_PADDING_SIZE);if(!decoder->extradata){vpa_close();return AVERROR(ENOMEM);}memcpy(decoder->extradata,extra,size);decoder->extradata_size=size;}
-    int ret=avcodec_open2(decoder,c,NULL);if(ret<0)vpa_close();return ret;
+    AVDictionary *options=NULL;
+    if(id==AV_CODEC_ID_HEVC&&execution_mode)av_dict_set_int(&options,"vp_analysis_mode",execution_mode,0);
+    int ret=avcodec_open2(decoder,c,&options);
+    if(ret>=0&&av_dict_count(options))ret=AVERROR(ENOSYS);
+    av_dict_free(&options);if(ret<0)vpa_close();return ret;
 }
 /* At most one bounded packet per step. JS owns independent packet iteration,
  * random access planning, cancellation checks and result backpressure. */
