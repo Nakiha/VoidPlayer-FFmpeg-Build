@@ -111,6 +111,19 @@ bash scripts/build-wasm.sh --ffmpeg-ref n8.1
 node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 [sample ...]
 ```
 
+Both ST and MT select FFmpeg's `wasm32` architecture with asm enabled, so the
+existing WASM DSP dispatch is available in addition to compiler SIMD. The pinned
+FFmpeg backend covers HEVC 8/10-bit IDCT and 8-bit SAO; this does not imply that
+every codec or DSP routine has a specialized SIMD implementation.
+`WASM_SIMD=0` disables `simd128` and omits `-msimd128` from FFmpeg, dav1d and
+the core link, independently of `--mt`. Use a separate `--build-root` for that
+mode. The cache signature includes architecture, asm, SIMD mode and threading;
+old generic-C caches are rejected rather than reused or deleted. New and cached
+configurations must have `ARCH_WASM=1` and the requested `HAVE_SIMD128` value.
+Cached configurations are checked before dependencies, and new ones before
+compiling FFmpeg. `scripts/test-wasm-build-cache.mjs BUILD_ROOT
+[--mt]` verifies these rejection paths (set the same `WASM_SIMD` as the build).
+
 The `--mt` variant (`voidplayer-core-mt.*`) uses Emscripten pthreads and needs
 the host page to be cross-origin isolated (COOP `same-origin` + COEP
 `require-corp`) for SharedArrayBuffer; `wasm/vp_decoder.c` hands decoders the

@@ -46,6 +46,11 @@ jobs:
           bash scripts/build-wasm.sh --ffmpeg-ref n9.0.2 --clean --skip-package
           bash scripts/build-wasm.sh --ffmpeg-ref n9.0.2 --mt --skip-package
 
+      - name: Reject stale playback backend caches before compiling dependencies
+        run: |
+          node scripts/test-wasm-build-cache.mjs .build
+          node scripts/test-wasm-build-cache.mjs .build --mt
+
       - name: Verify high-depth PQ and HLG planes against independent FFmpeg
         run: |
           node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js

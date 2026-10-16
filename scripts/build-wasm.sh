@@ -107,17 +107,17 @@ DEMUXERS="mpegps mpegvideo avi"
 DECODERS="ffv1 h264 hevc mpeg1video mpeg2video mpeg4 mjpeg prores vvc vp8 vp9"
 PARSERS="ffv1 h264 hevc mpegvideo mpeg4video mjpeg vvc vp8 vp9"
 
-# wasm SIMD128 (all modern browsers, Safari >= 16.4) measurably speeds up the
-# software decoders; disable with WASM_SIMD=0 for exotic targets.
+# Select FFmpeg's WASM DSP backend as well as compiler SIMD. WASM_SIMD=0
+# keeps the WASM architecture but disables both SIMD intrinsics and codegen.
 WASM_SIMD="${WASM_SIMD:-1}"
-SIMD_ARGS=()
+[[ "$WASM_SIMD" =~ ^(0|1)$ ]] || die "Invalid WASM_SIMD"
+FFMPEG_SIMD_ARGS=("--disable-simd128")
 SIMD_CFLAGS=""
 if [ "$WASM_SIMD" = "1" ]; then
-    SIMD_ARGS=("--extra-cflags=-msimd128" "--extra-ldflags=-msimd128")
+    FFMPEG_SIMD_ARGS=("--enable-simd128")
     SIMD_CFLAGS="-msimd128"
 fi
 if $MT; then
-    SIMD_ARGS=("--extra-cflags=-msimd128 -pthread -DVP_MT" "--extra-ldflags=-msimd128 -pthread")
     SIMD_CFLAGS="$SIMD_CFLAGS -pthread -DVP_MT"
 fi
 
@@ -128,10 +128,24 @@ WASM_LTO="${WASM_LTO:-0}"
 [[ "$WASM_LTO" =~ ^(0|1)$ ]] || die "Invalid WASM_LTO"
 if [ "$WASM_LTO" = 1 ]; then SIMD_CFLAGS="$SIMD_CFLAGS -flto"; fi
 SIMD_ARGS=("--extra-cflags=$SIMD_CFLAGS" "--extra-ldflags=$SIMD_CFLAGS" "--optflags=-O$WASM_OPT_LEVEL")
-SIGNATURE="$EXPECTED_REV:demux=$DEMUXERS:decoders=$DECODERS,libdav1d:parsers=$PARSERS:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
+SIGNATURE="$EXPECTED_REV:arch=wasm32:asm=1:ffmpeg-simd128=$WASM_SIMD:mt=$MT:demux=$DEMUXERS:decoders=$DECODERS,libdav1d:parsers=$PARSERS:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
+
+verify_wasm_backend() {
+    local config="$1" feature expected
+    # --disable-asm silently reduces even --arch=wasm32 to ARCH_WASM=0.
+    # Reject invalid caches before dependencies; check new configurations
+    # before compiling FFmpeg (whose configure needs installed dav1d).
+    for feature in ARCH_WASM HAVE_SIMD128; do
+        expected=1
+        if [ "$feature" = HAVE_SIMD128 ]; then expected="$WASM_SIMD"; fi
+        grep -Eq "^#define $feature $expected$" "$config" || \
+            die "Playback backend requires $feature=$expected; use a fresh --build-root"
+    done
+}
 if [ -f "$FFMPEG_BUILD/config.h" ] && [ "$(cat "$FFMPEG_BUILD/.build-signature" 2>/dev/null || true)" != "$SIGNATURE" ]; then
     die "Build inputs changed; use a fresh --build-root"
 fi
+if [ -f "$FFMPEG_BUILD/config.h" ]; then verify_wasm_backend "$FFMPEG_BUILD/config.h"; fi
 
 # dav1d supplies software AV1 for packet-fed FLV on browsers without AV1.
 DAV1D_SOURCE="$BUILD_ROOT/sources/dav1d-wasm"
@@ -158,10 +172,10 @@ FFMPEG_ARGS=(
     "--nm=emnm"
     "--strip=emstrip"
     "--target-os=none"
-    "--arch=x86_32"
+    "--arch=wasm32"
     "--cpu=generic"
     "--enable-cross-compile"
-    "--disable-asm"
+    "--enable-asm"
     "--disable-stripping"
     "--disable-programs"
     "--disable-doc"
@@ -180,6 +194,7 @@ FFMPEG_ARGS=(
     "--enable-swscale"
     "--enable-protocol=file"
     "${SIMD_ARGS[@]}"
+    "${FFMPEG_SIMD_ARGS[@]}"
 )
 if $MT; then
     FFMPEG_ARGS+=("--enable-pthreads")
@@ -191,6 +206,7 @@ for parser in $PARSERS; do FFMPEG_ARGS+=("--enable-parser=$parser"); done
 cd "$FFMPEG_BUILD"
 if [ ! -f config.h ]; then
     step emconfigure "$FFMPEG_SOURCE/configure" "${FFMPEG_ARGS[@]}"
+    verify_wasm_backend config.h
     printf '%s\n' "$SIGNATURE" > .build-signature
 fi
 
