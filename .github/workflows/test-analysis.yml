@@ -88,9 +88,11 @@ jobs:
             "$RUNNER_TEMP/candidate/voidplayer-analysis.js" "$RUNNER_TEMP/evidence/oracle.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/h264-cavlc.mp4" "$RUNNER_TEMP/fixtures/h264-mbaff.mp4" "$RUNNER_TEMP/fixtures/h264-10.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4"
           ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 4 -c:v libx265 -pix_fmt yuv420p -tag:v hev1 \
             -x265-params 'pools=none:frame-threads=1:lossless=1:keyint=4:bframes=0:log-level=error' "$RUNNER_TEMP/fixtures/hevc-lossless.mp4"
-          # VVC has no encoder in the runner's ffmpeg. The checked-in fixture is
-          # the first 16 frames of the QA Main10 sample, copied with -c copy
-          # (no re-encode); sha256 3f63aa8f130c558276ddedb443a7b74c36d2c895be034dcc838fb153b75611da.
+          # VVC has no encoder in the runner's ffmpeg, and its ffprobe predates
+          # VVC; the checked-in fixture is the first 16 frames of the QA Main10
+          # sample, copied with -c copy (no re-encode), plus a recorded packet
+          # sidecar the test replays when the container tag is not decodable.
+          # sha256 3f63aa8f130c558276ddedb443a7b74c36d2c895be034dcc838fb153b75611da.
           cp fixtures/analysis/vvc-main10-420-16f.mp4 "$RUNNER_TEMP/fixtures/vvc.mp4"
           node scripts/test-analysis-execution.mjs "$RUNNER_TEMP/candidate/voidplayer-analysis.js" \
             "$RUNNER_TEMP/evidence/execution.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4" "$RUNNER_TEMP/fixtures/hevc-lossless.mp4" "$RUNNER_TEMP/fixtures/vvc.mp4"
