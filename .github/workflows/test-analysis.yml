@@ -94,6 +94,7 @@ jobs:
           # sidecar (preferred when present, bound to the container hash).
           # sha256 3f63aa8f130c558276ddedb443a7b74c36d2c895be034dcc838fb153b75611da.
           cp fixtures/analysis/vvc-main10-420-16f.mp4 "$RUNNER_TEMP/fixtures/vvc.mp4"
+          cp fixtures/analysis/vvc-main10-420-16f.mp4.packets.json "$RUNNER_TEMP/fixtures/vvc.mp4.packets.json"
           node scripts/test-analysis-execution.mjs "$RUNNER_TEMP/candidate/voidplayer-analysis.js" \
             "$RUNNER_TEMP/evidence/execution.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4" "$RUNNER_TEMP/fixtures/hevc-lossless.mp4" "$RUNNER_TEMP/fixtures/vvc.mp4"
           cd "$RUNNER_TEMP/candidate"
