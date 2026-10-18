@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/test-analysis.yml'
       - 'analysis/**'
+      - 'fixtures/**'
       - 'shared/vp_capabilities.c'
       - 'scripts/build-analysis.sh'
       - 'scripts/write-capabilities.mjs'
@@ -58,6 +59,9 @@ jobs:
             bash "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh" > "$RUNNER_TEMP/evidence/baseline-build.log" 2>&1
           cp "$RUNNER_TEMP/baseline/manifest.json" "$RUNNER_TEMP/evidence/baseline-manifest.json"
           cp "$RUNNER_TEMP/baseline/capabilities.json" "$RUNNER_TEMP/evidence/baseline-capabilities.json"
+          # Pin the baseline expectation to the base branch's declared revision
+          # instead of the test's fallback literal, which goes stale on pin bumps.
+          echo "BASELINE_FFMPEG_REVISION=$(sed -n 's/^REV=\([a-f0-9]\{40\}\)$/\1/p' "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh")" >> "$GITHUB_ENV"
       - name: Verify sort ties, boundaries, collector budgets and cancellation
         run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json"
       - name: Generate test patterns and compare complete ABI and failure behavior
@@ -84,8 +88,15 @@ jobs:
             "$RUNNER_TEMP/candidate/voidplayer-analysis.js" "$RUNNER_TEMP/evidence/oracle.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/h264-cavlc.mp4" "$RUNNER_TEMP/fixtures/h264-mbaff.mp4" "$RUNNER_TEMP/fixtures/h264-10.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4"
           ffmpeg -v error -f lavfi -i testsrc2=size=128x64:rate=30 -frames:v 4 -c:v libx265 -pix_fmt yuv420p -tag:v hev1 \
             -x265-params 'pools=none:frame-threads=1:lossless=1:keyint=4:bframes=0:log-level=error' "$RUNNER_TEMP/fixtures/hevc-lossless.mp4"
+          # VVC has no encoder in the runner's ffmpeg, and its ffprobe predates
+          # VVC; the checked-in fixture is the first 16 frames of the QA Main10
+          # sample, copied with -c copy (no re-encode), plus a recorded packet
+          # sidecar (preferred when present, bound to the container hash).
+          # sha256 3f63aa8f130c558276ddedb443a7b74c36d2c895be034dcc838fb153b75611da.
+          cp fixtures/analysis/vvc-main10-420-16f.mp4 "$RUNNER_TEMP/fixtures/vvc.mp4"
+          cp fixtures/analysis/vvc-main10-420-16f.mp4.packets.json "$RUNNER_TEMP/fixtures/vvc.mp4.packets.json"
           node scripts/test-analysis-execution.mjs "$RUNNER_TEMP/candidate/voidplayer-analysis.js" \
-            "$RUNNER_TEMP/evidence/execution.json" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4" "$RUNNER_TEMP/fixtures/hevc-lossless.mp4"
+            "$RUNNER_TEMP/evidence/execution.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4" "$RUNNER_TEMP/fixtures/hevc-lossless.mp4" "$RUNNER_TEMP/fixtures/vvc.mp4"
           cd "$RUNNER_TEMP/candidate"
           sha256sum * > "$RUNNER_TEMP/evidence/members.sha256"
           zip -X "$RUNNER_TEMP/analysis-${{ github.event.pull_request.head.sha }}.zip" ./*

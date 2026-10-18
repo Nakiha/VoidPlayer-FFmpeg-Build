@@ -16,11 +16,11 @@
 int vpa_abi(void); void vpa_close(void); int vpa_open(int codec,const uint8_t *extra,int size);
 int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal);
 int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known,int ordinal);
-int vpa_drain(void); int vpa_step(void); int vpa_count(void); int vpa_blocks(void);
+int vpa_drain(void); int vpa_step(void); int vpa_count(void); intptr_t vpa_blocks(void);
 int vpa_depth(void); int vpa_ordinal(void); int vpa_width(void); int vpa_height(void); int vpa_invalid(void);
 double vpa_pts(void); int vpa_take(int maxBytes); int vpa_record_bytes(void);
 void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list);
-int vpa_reference_abi(void); int vpa_ref_count(void); int vpa_refs(void); int vpa_refs_invalid(void); int vpa_picture_type(void); int vpa_poc(void);
+int vpa_reference_abi(void); int vpa_ref_count(void); intptr_t vpa_refs(void); int vpa_refs_invalid(void); int vpa_picture_type(void); int vpa_poc(void);
 int vpa_execution_abi(void); int vpa_execution_mode(int mode); int vpa_execution_path(void); int vpa_execution_reason(void); int vpa_execution_retry_code(void);
 #define MAX_PICTURES 32
 #define MAX_BLOCKS VPA_BLOCK_LIMIT
@@ -72,7 +72,7 @@ void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list) {
 }
 int vpa_reference_abi(void){return 1;}
 int vpa_ref_count(void){return ready?ready->ref_count:0;}
-int vpa_refs(void){return ready?(int)(uintptr_t)ready->refs:0;}
+intptr_t vpa_refs(void){return ready?(intptr_t)ready->refs:0;}
 int vpa_refs_invalid(void){return !ready||ready->refs_invalid;}
 int vpa_picture_type(void){return ready?ready->type:-1;}
 int vpa_poc(void){return ready?ready->poc:0;}
@@ -88,7 +88,7 @@ void vpa_close(void){ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures
 int vpa_execution_abi(void){return 1;}
 int vpa_execution_retry_code(void){return VP_ANALYSIS_RETRY_FULL;}
 int vpa_execution_mode(int mode){if(decoder)return AVERROR(EBUSY);if(mode<0||mode>1)return AVERROR(EINVAL);execution_mode=mode;return 0;}
-static int execution_value(const char *name){int64_t value=0;if(decoder&&decoder->codec_id==AV_CODEC_ID_HEVC)av_opt_get_int(decoder->priv_data,name,0,&value);return (int)value;}
+static int execution_value(const char *name){int64_t value=0;if(decoder&&(decoder->codec_id==AV_CODEC_ID_HEVC||decoder->codec_id==AV_CODEC_ID_VVC))av_opt_get_int(decoder->priv_data,name,0,&value);return (int)value;}
 int vpa_execution_path(void){return execution_value("vp_analysis_path");}
 int vpa_execution_reason(void){return execution_value("vp_analysis_reason");}
 int vpa_open(int codec,const uint8_t *extra,int size){
@@ -108,7 +108,7 @@ int vpa_open(int codec,const uint8_t *extra,int size){
 #endif
     if(size){decoder->extradata=av_mallocz(size+AV_INPUT_BUFFER_PADDING_SIZE);if(!decoder->extradata){vpa_close();return AVERROR(ENOMEM);}memcpy(decoder->extradata,extra,size);decoder->extradata_size=size;}
     AVDictionary *options=NULL;
-    if(id==AV_CODEC_ID_HEVC&&execution_mode)av_dict_set_int(&options,"vp_analysis_mode",execution_mode,0);
+    if((id==AV_CODEC_ID_HEVC||id==AV_CODEC_ID_VVC)&&execution_mode)av_dict_set_int(&options,"vp_analysis_mode",execution_mode,0);
     int ret=avcodec_open2(decoder,c,&options);
     if(ret>=0&&av_dict_count(options))ret=AVERROR(ENOSYS);
     av_dict_free(&options);if(ret<0)vpa_close();return ret;
@@ -141,7 +141,7 @@ int vpa_step(void){
     av_frame_unref(frame);return 1;
 }
 int vpa_count(void){return ready?ready->count:0;}
-int vpa_blocks(void){return ready?(int)(uintptr_t)ready->blocks:0;}
+intptr_t vpa_blocks(void){return ready?(intptr_t)ready->blocks:0;}
 int vpa_ordinal(void){return ready?(int)ready->id-1:-1;}
 int vpa_width(void){return ready?ready->width:0;}
 int vpa_height(void){return ready?ready->height:0;}

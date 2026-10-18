@@ -1,7 +1,7 @@
 # Independent bitstream analysis core (ABI 1)
 
 `bash scripts/build-analysis.sh` builds single-threaded `voidplayer-analysis.js`
-and `.wasm` from pinned instrumented FFmpeg `c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e`.
+and `.wasm` from the instrumented FFmpeg revision pinned in that script (`REV=`).
 The playback build and its collection settings do not change. License: LGPL-2.1-or-later.
 Build patches and collector live here; the Web repository only consumes the result.
 
