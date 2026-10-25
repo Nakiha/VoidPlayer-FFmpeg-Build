@@ -356,3 +356,13 @@ analysis, with no speculative GOP staging or new execution ABI. Playback sources
 and artifacts are unaffected. `ANALYSIS_H264_SKIP_LOOP_FILTER=0` provides a local
 A/B control; it changes the always-relinked collector, and the manifest records
 `h264SkipLoopFilter`. It does not change the cached FFmpeg compile configuration.
+
+### Exact packet output identity
+
+The additive [packet identity ABI v1](wasm/PACKET_IDENTITY_ABI.md) carries explicit
+input tokens through H.264/HEVC reordering and drain, limited to 32 inputs per
+context. The host admits single progressive pictures and a closed start. This
+is output attribution, not reference-integrity/concealment certification. The
+existing packet/config/frame/picture interfaces remain compatible. Fixed native
+byte comparisons and protocol negatives run for both ST/MT cores in the WASM
+regression workflow; test fault modules are never packaged.
