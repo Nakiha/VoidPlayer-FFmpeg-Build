@@ -59,7 +59,21 @@ _Static_assert(offsetof(VPFrameInfo, revision) == 68, "frame ABI offsets");
 /* Separate versioned accessor; VPFrameInfo remains 160 bytes. */
 typedef struct { int64_t pts,dts,pos; uint64_t ordinal; int32_t size,stream; uint32_t flags,abi; uint64_t hash; } VPPictureInfo;
 _Static_assert(sizeof(VPPictureInfo)==56,"picture ABI size");
+/* Additive packet-output identity ABI v1. Never infer output identity from clocks. */
+typedef struct {
+    uint32_t abi, bytes;
+    uint64_t generation, token;
+    int64_t pts, dts;
+    uint64_t hash;
+    int32_t packet_bytes, decode_error_flags;
+    uint32_t frame_flags, valid;
+} VPPacketIdentity;
+_Static_assert(sizeof(VPPacketIdentity)==64,"packet identity ABI v1");
 typedef struct VPContext {
+    int packet_identity_mode, packet_identity_count, packet_identity_eof, packet_identity_failed;
+    uint32_t packet_identity_seen;
+    uint64_t packet_identity_generation;
+    VPPacketIdentity packet_identity, packet_expected[32];
     uint8_t *identity_config;
     VPPictureInfo picture;
     VPH264Admission *identity_admission;
@@ -185,6 +199,8 @@ void vp_destroy(VPContext *ctx) {
 void vp_close_input(VPContext *ctx) {
     vp_parser_timing_guard(0);
     if (!ctx) return;
+    ctx->packet_identity_mode=0;ctx->packet_identity_count=0;ctx->packet_identity_seen=0;ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
+    ctx->packet_identity_generation++;memset(&ctx->packet_identity,0,sizeof(ctx->packet_identity));
     free(ctx->identity_config);ctx->identity_config=NULL;
     free(ctx->identity_admission);ctx->identity_admission=NULL;
     free(ctx->identity_seen);ctx->identity_seen=NULL;
@@ -1206,7 +1222,7 @@ typedef struct {
 } VPPacketConfig;
 _Static_assert(sizeof(VPPacketConfig) == 40, "packet configuration ABI");
 int vp_packet_config_bytes(void) { return sizeof(VPPacketConfig); }
-int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra, int size, const VPPacketConfig *config) {
+static int vp_packet_open_internal(VPContext *ctx, const char *name, const uint8_t *extra, int size, const VPPacketConfig *config, int identified) {
     if (!ctx || !name || size < 0 || size > 1024 * 1024) return VP_ERR;
     if (config && (config->version != 1 || config->bytes != sizeof(VPPacketConfig) ||
         config->width < 1 || config->height < 1 || config->width > 32768 || config->height > 32768 ||
@@ -1222,6 +1238,9 @@ int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra
      * aligned automatic crop can discard the origin and leave extra pixels. */
     ctx->dec->apply_cropping = 0;
     ctx->dec->pkt_timebase = (AVRational){1, 1000000};
+    ctx->packet_identity_mode=identified;
+    if(identified)ctx->dec->flags|=AV_CODEC_FLAG_COPY_OPAQUE;
+
     ctx->dec->strict_std_compliance = FF_COMPLIANCE_STRICT;
     if (config) {
         ctx->dec->width = config->width; ctx->dec->height = config->height;
@@ -1233,6 +1252,7 @@ int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra
 #ifdef VP_MT
     ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : 2;
 #endif
+    if (identified) ctx->dec->thread_count = 1; /* identity budget is independent of playback threads */
     if (size) {
         ctx->dec->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!ctx->dec->extradata) return VP_ERR;
@@ -1240,6 +1260,65 @@ int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra
         ctx->dec->extradata_size = size;
     }
     return avcodec_open2(ctx->dec, codec, NULL) < 0 ? VP_ERR : 0;
+}
+int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra, int size, const VPPacketConfig *config) {
+    return vp_packet_open_internal(ctx,name,extra,size,config,0);
+}
+int vp_packet_identity_abi(void) {return 1;}
+int vp_packet_open_identity(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
+    if(!name || (strcmp(name,"h264") && strcmp(name,"hevc")))return VP_ERR;
+    return vp_packet_open_internal(ctx,name,extra,size,NULL,1);
+}
+const VPPacketIdentity *vp_packet_identity_info(VPContext *ctx) {
+    return ctx && ctx->packet_identity_mode && !ctx->packet_identity_failed && ctx->have_frame && ctx->packet_identity.valid ? &ctx->packet_identity : NULL;
+}
+int vp_packet_send_identity(VPContext *ctx,int64_t pts,int64_t dts,int key,int eof,uint64_t token) {
+    if(!ctx || !ctx->dec || !ctx->packet_identity_mode || ctx->packet_identity_eof || ctx->packet_identity_failed)return VP_ERR;
+    if(eof){
+        int ret=avcodec_send_packet(ctx->dec,NULL);
+        if(ret<0)return VP_ERR;
+        ctx->packet_identity_eof=1;return 0;
+    }
+    if(!token || ctx->packet_identity_count>=32)return VP_ERR;
+    for(int i=0;i<ctx->packet_identity_count;i++)if(ctx->packet_expected[i].token==token)return VP_ERR;
+    if(pts==AV_NOPTS_VALUE || dts==AV_NOPTS_VALUE)return VP_ERR;
+    VPPacketIdentity id={1,sizeof(VPPacketIdentity),ctx->packet_identity_generation,token,pts,dts,
+        vp_packet_hash(ctx->pkt->data,ctx->pkt->size),ctx->pkt->size,0,0,1};
+    AVBufferRef *buffer=av_buffer_alloc(sizeof(id));if(!buffer)return VP_ERR;
+    memcpy(buffer->data,&id,sizeof(id));av_buffer_unref(&ctx->pkt->opaque_ref);ctx->pkt->opaque_ref=buffer;
+    ctx->pkt->pts=pts;ctx->pkt->dts=dts;ctx->pkt->flags=key?AV_PKT_FLAG_KEY:0;
+    int ret=avcodec_send_packet(ctx->dec,ctx->pkt);av_packet_unref(ctx->pkt);
+    if(ret<0)return VP_ERR;
+    ctx->packet_expected[ctx->packet_identity_count++]=id;return 0;
+}
+#ifdef VP_PACKET_IDENTITY_TEST_FAULTS
+static int vp_probe_fault=0;
+void vp_packet_probe_fault(int mode){vp_probe_fault=mode;}
+#endif
+static int vp_packet_receive_identity(VPContext *ctx) {
+#ifdef VP_PACKET_IDENTITY_TEST_FAULTS
+    if(vp_probe_fault==1)av_buffer_unref(&ctx->frame->opaque_ref);
+    if(vp_probe_fault>=2 && vp_probe_fault<=6 && ctx->frame->opaque_ref && ctx->frame->opaque_ref->size==sizeof(VPPacketIdentity)){
+        VPPacketIdentity *id=(VPPacketIdentity *)ctx->frame->opaque_ref->data;
+        if(vp_probe_fault==2)id->token^=1;
+        if(vp_probe_fault==3)id->generation++;
+        if(vp_probe_fault==4)id->hash^=1;
+        if(vp_probe_fault==5)id->abi++;
+        if(vp_probe_fault==6)id->dts++;
+    }
+    if(vp_probe_fault==7)ctx->frame->decode_error_flags|=1;
+    if(vp_probe_fault==8)ctx->frame->flags|=AV_FRAME_FLAG_INTERLACED;
+    if(vp_probe_fault==9)ctx->packet_identity_seen=UINT32_MAX;
+#endif
+
+    if(!ctx->frame->opaque_ref || ctx->frame->opaque_ref->size!=sizeof(VPPacketIdentity))return VP_ERR;
+    VPPacketIdentity id;memcpy(&id,ctx->frame->opaque_ref->data,sizeof(id));
+    int slot=-1;
+    for(int i=0;i<ctx->packet_identity_count;i++)if(!memcmp(&id,&ctx->packet_expected[i],sizeof(id))){slot=i;break;}
+    if(slot<0 || (ctx->packet_identity_seen&(1u<<slot)) || ctx->frame->pts!=id.pts)return VP_ERR;
+    id.decode_error_flags=ctx->frame->decode_error_flags;id.frame_flags=ctx->frame->flags;
+    if(id.decode_error_flags || (id.frame_flags&(AV_FRAME_FLAG_CORRUPT|AV_FRAME_FLAG_INTERLACED)))return VP_ERR;
+    ctx->packet_identity_seen|=1u<<slot;ctx->packet_identity=id;return 0;
 }
 int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
     return vp_packet_open_config(ctx, name, extra, size, NULL);
@@ -1253,7 +1332,7 @@ uint8_t *vp_packet_alloc(VPContext *ctx, int size) {
 }
 
 int vp_packet_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
-    if (!ctx || !ctx->dec) return VP_ERR;
+    if (!ctx || !ctx->dec || ctx->packet_identity_mode) return VP_ERR;
     ctx->pkt->pts = pts; ctx->pkt->dts = dts;
     ctx->pkt->flags = key ? AV_PKT_FLAG_KEY : 0;
     int ret = avcodec_send_packet(ctx->dec, eof ? NULL : ctx->pkt);
@@ -1263,15 +1342,18 @@ int vp_packet_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
 
 int vp_packet_receive(VPContext *ctx, int64_t minimum_pts) {
     if (!ctx || !ctx->dec) return VP_ERR;
+    if(ctx->packet_identity_mode && (minimum_pts!=INT64_MIN || ctx->packet_identity_failed))return VP_ERR;
+    if(ctx->packet_identity_mode){ctx->have_frame=0;memset(&ctx->packet_identity,0,sizeof(ctx->packet_identity));}
     for (;;) {
         av_frame_unref(ctx->frame);
         int ret = avcodec_receive_frame(ctx->dec, ctx->frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) return 0;
-        if (ret < 0) return VP_ERR;
+        if (ret < 0) { if(ctx->packet_identity_mode)ctx->packet_identity_failed=1; return VP_ERR; }
+        if(ctx->packet_identity_mode && vp_packet_receive_identity(ctx)<0){ctx->packet_identity_failed=1;return VP_ERR;}
         int64_t pts = ctx->frame->best_effort_timestamp;
         if (pts == AV_NOPTS_VALUE) pts = ctx->frame->pts;
         if (pts < minimum_pts) continue;
-        if (vp_convert(ctx) < 0) return VP_ERR;
+        if (vp_convert(ctx) < 0) { if(ctx->packet_identity_mode)ctx->packet_identity_failed=1; return VP_ERR; }
         ctx->last_ticks = pts;
         ctx->have_frame = 1;
         return 1;
@@ -1288,4 +1370,6 @@ void vp_packet_reset(VPContext *ctx) {
     av_packet_unref(ctx->pkt);
     av_frame_unref(ctx->frame);
     vp_reset_decoder_state(ctx);
+    ctx->packet_identity_generation++;ctx->packet_identity_count=0;ctx->packet_identity_seen=0;ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
+    memset(&ctx->packet_identity,0,sizeof(ctx->packet_identity));
 }
