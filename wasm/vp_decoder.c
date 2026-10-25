@@ -1252,6 +1252,7 @@ static int vp_packet_open_internal(VPContext *ctx, const char *name, const uint8
 #ifdef VP_MT
     ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : 2;
 #endif
+    if (identified) ctx->dec->thread_count = 1; /* identity budget is independent of playback threads */
     if (size) {
         ctx->dec->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
         if (!ctx->dec->extradata) return VP_ERR;

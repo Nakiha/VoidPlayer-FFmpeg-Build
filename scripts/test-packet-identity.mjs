@@ -11,7 +11,7 @@ const core=await factory({wasmBinary:readFileSync(glue.replace(/\.js$/,'.wasm'))
 const call=(n,t=[],a=[],r='number')=>core.ccall(n,r,t,a),heap=()=>core.HEAPU8;
 const hash=b=>{let n=14695981039346656037n;for(const x of b)n=BigInt.asUintN(64,(n^BigInt(x))*1099511628211n);return n;};
 assert.equal(call('vp_packet_identity_abi'),1);assert.equal(call('vp_packet_config_bytes'),40);assert.equal(call('vp_picture_abi_version'),1);
-const open=(s,legacy=false)=>{const c=call('vp_create'),b=Buffer.from(s.configuration,'base64'),p=core._malloc(b.length);heap().set(b,p);assert.equal(call(legacy?'vp_packet_open':'vp_packet_open_identity',['number','string','number','number'],[c,s.codec,p,b.length]),0);core._free(p);return c;};
+const open=(s,legacy=false)=>{call('vp_set_threads',['number'],[legacy?1:2],null);const c=call('vp_create'),b=Buffer.from(s.configuration,'base64'),p=core._malloc(b.length);heap().set(b,p);assert.equal(call(legacy?'vp_packet_open':'vp_packet_open_identity',['number','string','number','number'],[c,s.codec,p,b.length]),0);core._free(p);return c;};
 const send=(ctx,p,token,legacy=false)=>{const b=Buffer.from(p.bytes,'base64'),ptr=call('vp_packet_alloc',['number','number'],[ctx,b.length]);assert.ok(ptr);heap().set(b,ptr);return call(legacy?'vp_packet_send':'vp_packet_send_identity',['number','i64','i64','number','number',...(legacy?[]:['i64'])],[ctx,BigInt(p.pts),BigInt(p.dts),+p.key,0,...(legacy?[]:[token])]);};
 const drain=(ctx,legacy=false)=>call(legacy?'vp_packet_send':'vp_packet_send_identity',['number','i64','i64','number','number',...(legacy?[]:['i64'])],[ctx,0n,0n,0,1,...(legacy?[]:[0n])]);
 let frames=0,drained=0,negative=0;
