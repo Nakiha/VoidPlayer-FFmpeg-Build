@@ -71,9 +71,9 @@ typedef struct {
 _Static_assert(sizeof(VPPacketIdentity)==64,"packet identity ABI v1");
 typedef struct VPContext {
     int packet_identity_mode, packet_identity_count, packet_identity_eof, packet_identity_failed;
-    uint32_t packet_identity_seen;
+    uint8_t packet_identity_seen[512];
     uint64_t packet_identity_generation;
-    VPPacketIdentity packet_identity, packet_expected[32];
+    VPPacketIdentity packet_identity, packet_expected[512];
     uint8_t *identity_config;
     VPPictureInfo picture;
     VPH264Admission *identity_admission;
@@ -199,7 +199,7 @@ void vp_destroy(VPContext *ctx) {
 void vp_close_input(VPContext *ctx) {
     vp_parser_timing_guard(0);
     if (!ctx) return;
-    ctx->packet_identity_mode=0;ctx->packet_identity_count=0;ctx->packet_identity_seen=0;ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
+    ctx->packet_identity_mode=0;ctx->packet_identity_count=0;memset(ctx->packet_identity_seen,0,sizeof(ctx->packet_identity_seen));ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
     ctx->packet_identity_generation++;memset(&ctx->packet_identity,0,sizeof(ctx->packet_identity));
     free(ctx->identity_config);ctx->identity_config=NULL;
     free(ctx->identity_admission);ctx->identity_admission=NULL;
@@ -1265,6 +1265,7 @@ int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra
     return vp_packet_open_internal(ctx,name,extra,size,config,0);
 }
 int vp_packet_identity_abi(void) {return 1;}
+int vp_packet_identity_capacity(void) {return 512;}
 int vp_packet_open_identity(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
     if(!name || (strcmp(name,"h264") && strcmp(name,"hevc")))return VP_ERR;
     return vp_packet_open_internal(ctx,name,extra,size,NULL,1);
@@ -1279,7 +1280,7 @@ int vp_packet_send_identity(VPContext *ctx,int64_t pts,int64_t dts,int key,int e
         if(ret<0)return VP_ERR;
         ctx->packet_identity_eof=1;return 0;
     }
-    if(!token || ctx->packet_identity_count>=32)return VP_ERR;
+    if(!token || ctx->packet_identity_count>=512)return VP_ERR;
     for(int i=0;i<ctx->packet_identity_count;i++)if(ctx->packet_expected[i].token==token)return VP_ERR;
     if(pts==AV_NOPTS_VALUE || dts==AV_NOPTS_VALUE)return VP_ERR;
     VPPacketIdentity id={1,sizeof(VPPacketIdentity),ctx->packet_identity_generation,token,pts,dts,
@@ -1308,17 +1309,17 @@ static int vp_packet_receive_identity(VPContext *ctx) {
     }
     if(vp_probe_fault==7)ctx->frame->decode_error_flags|=1;
     if(vp_probe_fault==8)ctx->frame->flags|=AV_FRAME_FLAG_INTERLACED;
-    if(vp_probe_fault==9)ctx->packet_identity_seen=UINT32_MAX;
+    if(vp_probe_fault==9)memset(ctx->packet_identity_seen,1,sizeof(ctx->packet_identity_seen));
 #endif
 
     if(!ctx->frame->opaque_ref || ctx->frame->opaque_ref->size!=sizeof(VPPacketIdentity))return VP_ERR;
     VPPacketIdentity id;memcpy(&id,ctx->frame->opaque_ref->data,sizeof(id));
     int slot=-1;
     for(int i=0;i<ctx->packet_identity_count;i++)if(!memcmp(&id,&ctx->packet_expected[i],sizeof(id))){slot=i;break;}
-    if(slot<0 || (ctx->packet_identity_seen&(1u<<slot)) || ctx->frame->pts!=id.pts)return VP_ERR;
+    if(slot<0 || ctx->packet_identity_seen[slot] || ctx->frame->pts!=id.pts)return VP_ERR;
     id.decode_error_flags=ctx->frame->decode_error_flags;id.frame_flags=ctx->frame->flags;
     if(id.decode_error_flags || (id.frame_flags&(AV_FRAME_FLAG_CORRUPT|AV_FRAME_FLAG_INTERLACED)))return VP_ERR;
-    ctx->packet_identity_seen|=1u<<slot;ctx->packet_identity=id;return 0;
+    ctx->packet_identity_seen[slot]=1;ctx->packet_identity=id;return 0;
 }
 int vp_packet_open(VPContext *ctx, const char *name, const uint8_t *extra, int size) {
     return vp_packet_open_config(ctx, name, extra, size, NULL);
@@ -1370,6 +1371,6 @@ void vp_packet_reset(VPContext *ctx) {
     av_packet_unref(ctx->pkt);
     av_frame_unref(ctx->frame);
     vp_reset_decoder_state(ctx);
-    ctx->packet_identity_generation++;ctx->packet_identity_count=0;ctx->packet_identity_seen=0;ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
+    ctx->packet_identity_generation++;ctx->packet_identity_count=0;memset(ctx->packet_identity_seen,0,sizeof(ctx->packet_identity_seen));ctx->packet_identity_eof=0;ctx->packet_identity_failed=0;
     memset(&ctx->packet_identity,0,sizeof(ctx->packet_identity));
 }

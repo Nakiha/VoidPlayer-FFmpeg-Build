@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 const [glue,mode]=process.argv.slice(2);
 const samples=JSON.parse(readFileSync(new URL('../fixtures/packet-identity/samples.json',import.meta.url))).samples;
 const factory=(await import(pathToFileURL(path.resolve(glue)))).default;
-const core=await factory({wasmBinary:readFileSync(glue.replace(/\.js$/,'.wasm'))});
+const core=await factory({wasmBinary:readFileSync(glue.replace(/\.m?js$/,'.wasm'))});
 const call=(n,t=[],a=[],r='number')=>core.ccall(n,r,t,a),heap=()=>core.HEAPU8;
 const hash=b=>{let n=14695981039346656037n;for(const x of b)n=BigInt.asUintN(64,(n^BigInt(x))*1099511628211n);return n;};
 assert.equal(call('vp_packet_identity_abi'),1);assert.equal(call('vp_packet_config_bytes'),40);assert.equal(call('vp_picture_abi_version'),1);
@@ -27,6 +27,8 @@ if(mode==='--fault'){
  }
  console.log(`PASS packet identity: ${negative} injected missing/unknown/stale/tampered/duplicate/error/interlaced outputs refused`);process.exit(0);
 }
+assert.equal(call('vp_packet_identity_capacity'),512);
+for(const original of [...samples].filter(s=>s.packets.length===32)){const repeats=16,span=Math.max(...original.packets.map(p=>p.pts))-Math.min(...original.packets.map(p=>p.pts))+250000;const native=Buffer.concat(Array.from({length:repeats},()=>Buffer.from(original.native,'base64')));samples.push({...original,packets:Array.from({length:repeats},(_,i)=>original.packets.map(p=>({...p,pts:p.pts+i*span,dts:p.dts+i*span}))).flat(),displayAuOrder:Array.from({length:repeats},(_,i)=>original.displayAuOrder.map(au=>au+i*32)).flat(),native:native.toString('base64'),nativeSha256:createHash('sha256').update(native).digest('hex')});}
 assert.equal(typeof core._vp_packet_probe_fault,'undefined','production module must not expose test faults');
 for(const s of samples){
  const native=Buffer.from(s.native,'base64'),frameBytes=s.width*s.height*3/2*(s.depth===8?1:2);
@@ -46,7 +48,7 @@ for(const s of samples){
    order.push(au);if(phase==='drain')drainCount++;
   }};
   for(let i=0;i<s.packets.length;i++){assert.equal(send(ctx,s.packets[i],tokens[i],legacy),0);sent++;receive('immediate');}
-  if(!legacy&&s.packets.length===32){assert.equal(send(ctx,s.packets.at(-1),999n),-1);negative++;}
+  if(!legacy&&s.packets.length===512){assert.equal(send(ctx,s.packets.at(-1),999n),-1);negative++;}
   assert.equal(drain(ctx,legacy),0);receive('drain');assert.deepEqual(order,s.displayAuOrder);assert.equal(drainCount,s.drainOutputs);
   if(!legacy){frames+=order.length;drained+=drainCount;assert.equal(drain(ctx),-1);negative++;assert.equal(call('vp_packet_send',['number','i64','i64','number','number'],[ctx,0n,0n,0,0]),-1);negative++;}
   call('vp_destroy',['number'],[ctx],null);

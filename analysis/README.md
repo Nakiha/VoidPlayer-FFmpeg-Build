@@ -121,3 +121,61 @@ This branch is stacked on unmerged sorter PR9 (a6bb9b13). The new FFmpeg pin
 must be published/reviewed before this Core branch can build from its public URL;
 local validation uses an explicit ANALYSIS_FFMPEG_SOURCE checkout. Web pins must
 only move after the upstream sources/artifact are available.
+
+## Pixel scoring ABI 1
+
+The same analysis artifact also exports `vpa_quality_*`. These entry points are
+independent of `vpa_open/feed/step` and do not run while inspecting bitstreams.
+They take tightly packed YUV420 8/10-bit source pixels and a caller-assigned
+continuous ordinal. They do not accept timestamps, decode, align, resize, change
+color range, or use libavfilter. The host must validate source identity and crop
+both inputs consistently before feeding a clip. Built-in VMAF v0.6.1/NEG models
+and CAMBI are pinned to Netflix/vmaf 17a67b238ce0539bdeafdc95961abac64fa16ea8.
+
+One context lasts the whole declared clip, including final temporal flush.
+Input pictures are copied into libvmaf-owned storage. Scalars accumulate up to
+the declared frame budget; raw pixels and five CAMBI heatmaps retain only the
+current working state. Heatmap pointers are valid until the next feed/close.
+The memory-output patch preserves the official gray16 conversion and changes
+only the destination. CAMBI uses window_size=63 to match the product recipe.
+The C ABI supports at most 4096 by 2304 pixels (or equal area with each dimension
+at most 4096); 8/10-bit, even dimensions, minimum 64, CAMBI long edge at least320.
+Allocation failures, invalid order and clip limits return negative errno.
+Extractor failure poisons the context until close; cancellation destroys the
+owning Worker. Never flush/reopen arbitrary chunks to approximate a long clip.
+
+Build now also requires Meson and Ninja. `scripts/build-quality-library.sh`
+fetches the fixed library revision, applies the checked memory patch and links
+it into `voidplayer-analysis.wasm` with FILESYSTEM=0. The artifact includes
+libvmaf and LIBSVM license notices and model hashes in manifest.json.
+`node scripts/test-analysis-quality.mjs /path/to/artifact` exercises both metrics,
+clip boundaries, sequential input and repeated resource release. The consuming
+Web repository additionally compares official scores and every heatmap byte
+against committed 8/10-bit raw-pixel oracles and runs real media HTTP tests.
+
+## Direct XPSNR ABI 1
+
+`vpa_xpsnr_open(width,height,depth,rateNumerator,rateDenominator,maxFrames)`
+creates one independent reference-first clip. `feed(reference,distorted,bytes,index)`
+accepts the same tight planar pixels; `score(plane)` returns the last frame's
+full-precision Y/U/V dB value. `flush()` requires the entire declared clip;
+`pool(plane)` returns the algorithm's square-mean-root pool with its original
+low-distortion log fallback. Positive infinity is a valid identical-input score;
+NaN means an unavailable result. `close()` releases all state and is idempotent.
+
+The scalar math is adapted from FFmpeg revision
+8998a1a670c81a04d144c36f9e2d3aa680c10720, vf_xpsnr.c SHA-256
+4b59b32eb4a501ac74f6d767a916ef1a29833e1895b150cfa96b8e4ffb91f3d7.
+The adapter has no avfilter, framesync, timestamps, conversion or filesystem.
+The host supplies exact frame rate and order; the pinned algorithm uses the
+integer part of frame rate to choose temporal derivative order. Its two previous
+reference luma pictures persist across the entire clip. A cropped evaluation
+must crop both sources before feed and is a separate score, not a spatial map.
+
+`test-analysis-xpsnr.mjs` checks 20 independently generated official CLI clips:
+24, 30000/1001 and 60 fps; 8/10-bit; identical, near-identical and noisy images;
+HD and 4096×2304 geometry. Source hashes are exact; CLI score tolerance is
+0.000051 because its text interface emits four decimal places. Four 4096-frame
+runs also check stable heap and context reset. Regenerate the committed oracle
+only with `refresh-analysis-xpsnr-oracle.mjs <pinned-ffmpeg> <clean-source>`;
+ordinary tests neither build nor execute a native scorer.

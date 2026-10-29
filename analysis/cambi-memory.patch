@@ -1,0 +1,38 @@
+--- a/libvmaf/src/feature/cambi.c
++++ b/libvmaf/src/feature/cambi.c
+@@ -29,6 +29,11 @@
+ #include "mem.h"
+ #include "mkdirp.h"
+ #include "picture.h"
++
++#ifdef VP_CAMBI_MEMORY
++extern int vp_cambi_heatmaps_enabled(void);
++extern int vp_cambi_heatmap_row(const uint16_t *, int, int, int, int, int);
++#endif
+ 
+ #if ARCH_X86
+ #include "x86/cambi_avx2.h"
+@@ -1006,6 +1011,13 @@
+         for (int j = 0; j < width; j++) {
+             to_write[j] = (uint16_t)(scaling_value * c_values[i * width + j]);
+         }
++#ifdef VP_CAMBI_MEMORY
++        if (vp_cambi_heatmaps_enabled()) {
++            int err = vp_cambi_heatmap_row(to_write, width, height, scale, i, frame);
++            if (err) { free(to_write); return err; }
++            continue;
++        }
++#endif
+         ptrdiff_t offset = (frame * height + i) * width * sizeof(uint16_t);
+         fseek(file, offset, SEEK_SET);
+         fwrite((void*)to_write, sizeof(uint16_t), width, file);
+@@ -1066,6 +1078,9 @@
+     if (err) return err;
+ 
+     bool write_heatmaps = s->heatmaps_path && !is_src;
++#ifdef VP_CAMBI_MEMORY
++    write_heatmaps = (s->heatmaps_path || vp_cambi_heatmaps_enabled()) && !is_src;
++#endif
+     err = cambi_score(s->pics, window_size, s->topk, num_diffs, s->buffers.tvi_for_diff,
+                       s->buffers, s->inc_range_callback, s->dec_range_callback, score, write_heatmaps, s->heatmaps_files, width, height, frame);
+     if (err) return err;
