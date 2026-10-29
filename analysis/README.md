@@ -152,3 +152,30 @@ libvmaf and LIBSVM license notices and model hashes in manifest.json.
 clip boundaries, sequential input and repeated resource release. The consuming
 Web repository additionally compares official scores and every heatmap byte
 against committed 8/10-bit raw-pixel oracles and runs real media HTTP tests.
+
+## Direct XPSNR ABI 1
+
+`vpa_xpsnr_open(width,height,depth,rateNumerator,rateDenominator,maxFrames)`
+creates one independent reference-first clip. `feed(reference,distorted,bytes,index)`
+accepts the same tight planar pixels; `score(plane)` returns the last frame's
+full-precision Y/U/V dB value. `flush()` requires the entire declared clip;
+`pool(plane)` returns the algorithm's square-mean-root pool with its original
+low-distortion log fallback. Positive infinity is a valid identical-input score;
+NaN means an unavailable result. `close()` releases all state and is idempotent.
+
+The scalar math is adapted from FFmpeg revision
+8998a1a670c81a04d144c36f9e2d3aa680c10720, vf_xpsnr.c SHA-256
+4b59b32eb4a501ac74f6d767a916ef1a29833e1895b150cfa96b8e4ffb91f3d7.
+The adapter has no avfilter, framesync, timestamps, conversion or filesystem.
+The host supplies exact frame rate and order; the pinned algorithm uses the
+integer part of frame rate to choose temporal derivative order. Its two previous
+reference luma pictures persist across the entire clip. A cropped evaluation
+must crop both sources before feed and is a separate score, not a spatial map.
+
+`test-analysis-xpsnr.mjs` checks 20 independently generated official CLI clips:
+24, 30000/1001 and 60 fps; 8/10-bit; identical, near-identical and noisy images;
+HD and 4096×2304 geometry. Source hashes are exact; CLI score tolerance is
+0.000051 because its text interface emits four decimal places. Four 4096-frame
+runs also check stable heap and context reset. Regenerate the committed oracle
+only with `refresh-analysis-xpsnr-oracle.mjs <pinned-ffmpeg> <clean-source>`;
+ordinary tests neither build nor execute a native scorer.

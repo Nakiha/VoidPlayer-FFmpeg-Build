@@ -65,6 +65,8 @@ jobs:
           echo "BASELINE_FFMPEG_REVISION=$(sed -n 's/^REV=\([a-f0-9]\{40\}\)$/\1/p' "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh")" >> "$GITHUB_ENV"
       - name: Verify pixel scoring and memory heatmap ABI
         run: node scripts/test-analysis-quality.mjs "$RUNNER_TEMP/candidate"
+      - name: Verify direct XPSNR against pinned independent official clips
+        run: node scripts/test-analysis-xpsnr.mjs "$RUNNER_TEMP/candidate"
       - name: Verify sort ties, boundaries, collector budgets and cancellation
         run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json"
       - name: Generate test patterns and compare complete ABI and failure behavior
