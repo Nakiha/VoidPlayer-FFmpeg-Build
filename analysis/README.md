@@ -121,3 +121,34 @@ This branch is stacked on unmerged sorter PR9 (a6bb9b13). The new FFmpeg pin
 must be published/reviewed before this Core branch can build from its public URL;
 local validation uses an explicit ANALYSIS_FFMPEG_SOURCE checkout. Web pins must
 only move after the upstream sources/artifact are available.
+
+## Pixel scoring ABI 1
+
+The same analysis artifact also exports `vpa_quality_*`. These entry points are
+independent of `vpa_open/feed/step` and do not run while inspecting bitstreams.
+They take tightly packed YUV420 8/10-bit source pixels and a caller-assigned
+continuous ordinal. They do not accept timestamps, decode, align, resize, change
+color range, or use libavfilter. The host must validate source identity and crop
+both inputs consistently before feeding a clip. Built-in VMAF v0.6.1/NEG models
+and CAMBI are pinned to Netflix/vmaf 17a67b238ce0539bdeafdc95961abac64fa16ea8.
+
+One context lasts the whole declared clip, including final temporal flush.
+Input pictures are copied into libvmaf-owned storage. Scalars accumulate up to
+the declared frame budget; raw pixels and five CAMBI heatmaps retain only the
+current working state. Heatmap pointers are valid until the next feed/close.
+The memory-output patch preserves the official gray16 conversion and changes
+only the destination. CAMBI uses window_size=63 to match the product recipe.
+The C ABI supports at most 4096 by 2304 pixels (or equal area with each dimension
+at most 4096); 8/10-bit, even dimensions, minimum 64, CAMBI long edge at least320.
+Allocation failures, invalid order and clip limits return negative errno.
+Extractor failure poisons the context until close; cancellation destroys the
+owning Worker. Never flush/reopen arbitrary chunks to approximate a long clip.
+
+Build now also requires Meson and Ninja. `scripts/build-quality-library.sh`
+fetches the fixed library revision, applies the checked memory patch and links
+it into `voidplayer-analysis.wasm` with FILESYSTEM=0. The artifact includes
+libvmaf and LIBSVM license notices and model hashes in manifest.json.
+`node scripts/test-analysis-quality.mjs /path/to/artifact` exercises both metrics,
+clip boundaries, sequential input and repeated resource release. The consuming
+Web repository additionally compares official scores and every heatmap byte
+against committed 8/10-bit raw-pixel oracles and runs real media HTTP tests.
