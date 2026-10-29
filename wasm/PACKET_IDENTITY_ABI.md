@@ -47,3 +47,5 @@ integrity certification or proof of no concealment**. Error flags detect only
 reported decoder errors. No bitstream repair, alignment, PTS search or automatic
 reference pairing is performed. A host must charge all input/output/drain work
 and physically terminate its owning Worker before releasing resource admission.
+
+The additive `vp_packet_identity_capacity()` export reports 512 admitted packets per context. Membership uses one byte per slot; slots 32 and above do not alias the former bit mask. Callers without this export retain a 32-packet limit. ABI 1 descriptors and legacy packet entry points are unchanged. Long clips advance through independently verified closed GOPs; decoded raw frames need not be retained.
