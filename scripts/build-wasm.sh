@@ -230,8 +230,9 @@ printf '#define VP_CORE_BUILD_ID "%s"\n' "$CORE_BUILD_ID" > "$CORE_BUILD_ID_HEAD
 
 MT_LDFLAGS=()
 if $MT; then
-    # Pool sized for decode workers; spawned inside our hosting Web Worker.
-    MT_LDFLAGS=(-pthread -sPTHREAD_POOL_SIZE=4)
+    # Preload the requested workers before synchronous codec initialization.
+    # Keep the historical pool size for hosts that omit the playback option.
+    MT_LDFLAGS=(-pthread '-sPTHREAD_POOL_SIZE=Math.max(1,Math.min(12,Module["vpPthreadPoolSize"]|0||4))')
 fi
 
 step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_capabilities.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
