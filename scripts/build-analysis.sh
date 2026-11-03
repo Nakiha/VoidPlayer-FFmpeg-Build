@@ -10,6 +10,7 @@ HEAP_MAX=536870912
 if [[ "$THREADING" == pthreads ]]; then HEAP_MAX=1073741824; fi
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
 REV=856df065ba064815eba3c6e3e77c5268e912f7ee
+if [[ "$THREADING" == pthreads ]]; then REV=a2bbd5995ec0290da13f68d7156c292f2598f26a; fi
 VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi
@@ -81,13 +82,13 @@ if [[ "$THREADING" == pthreads ]]; then
     "-sPTHREAD_POOL_SIZE=Module['analysisThreads'] ?? 0" -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY="$HEAP_MAX" \
     -s EXPORTED_RUNTIME_METHODS='["HEAPU8","PThread"]' \
     -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_execution_abi","_vpa_execution_mode","_vpa_execution_path","_vpa_execution_reason","_vpa_execution_retry_code","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vp_capability_abi","_vp_build_id","_vp_demuxer_count","_vp_demuxer_name","_vp_decoder_count","_vp_decoder_name","_vpa_configure_threads"]' \
-    -o "$OUT/voidplayer-analysis-mt.js"
-  python3 - "$OUT" "$CORE_REV" "$HEAP_MAX" <<'PYTHON'
+    --extern-pre-js "$ROOT/analysis/node-pthread-pre.js" -o "$OUT/voidplayer-analysis-mt.js"
+  python3 - "$OUT" "$CORE_REV" "$REV" "$HEAP_MAX" <<'PYTHON'
 import hashlib,json,pathlib,sys
-out,revision,heap=sys.argv[1:]
+out,revision,ffmpeg,heap=sys.argv[1:]
 base=pathlib.Path(out)
 digest=hashlib.sha256((base/'voidplayer-analysis-mt.wasm').read_bytes()).hexdigest()
-(base/'threading.json').write_text(json.dumps({'abi':1,'revision':revision,'buildId':revision+':mt-'+digest[:16],
+(base/'threading.json').write_text(json.dumps({'abi':1,'revision':revision,'ffmpegRevision':ffmpeg,'buildId':revision+':mt-'+digest[:16],
     'heapMaxBytes':int(heap),'maxThreads':4},indent=2)+'\n')
 PYTHON
   exit 0
