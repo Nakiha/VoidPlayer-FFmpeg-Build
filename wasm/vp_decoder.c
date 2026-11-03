@@ -6,6 +6,10 @@
 // continuation for sequential stepping.
 
 #include <libavcodec/avcodec.h>
+#if __has_include(<libavcodec/vvc_tuning.h>)
+#include <libavcodec/vvc_tuning.h>
+#define VP_VVC_TUNING 1
+#endif
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 #include <libavutil/avutil.h>
@@ -176,11 +180,26 @@ void vp_set_vvc_frame_contexts(int count) {
     g_vvc_frame_contexts = count > 0 ? count : 0;
 }
 
+static int g_vvc_frame_context_capacity;
+
+void vp_set_vvc_frame_context_capacity(int count) {
+    g_vvc_frame_context_capacity = count > 0 ? count : 0;
+}
+
+int vp_grow_vvc_frame_contexts(VPContext *ctx, int count) {
+#if defined(VP_MT) && defined(VP_VVC_TUNING)
+    if (ctx && ctx->dec) return avcodec_vvc_grow_frame_contexts(ctx->dec, count);
+#endif
+    return AVERROR(ENOSYS);
+}
+
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
     const int threads = dec->thread_count > 0 ? dec->thread_count : 1;
     const int contexts = g_vvc_frame_contexts ? g_vvc_frame_contexts : threads;
     int ret = codec->priv_class ? av_opt_set_int(dec->priv_data, "frame_contexts", contexts, 0) : AVERROR_OPTION_NOT_FOUND;
+    if (ret >= 0 && g_vvc_frame_context_capacity)
+        ret = av_opt_set_int(dec->priv_data, "frame_context_capacity", g_vvc_frame_context_capacity, 0);
     if (ret != AVERROR_OPTION_NOT_FOUND || g_vvc_frame_contexts)
         return ret < 0 ? ret : avcodec_open2(dec, codec, NULL);
     // Standalone builds can still use unpatched upstream FFmpeg.
