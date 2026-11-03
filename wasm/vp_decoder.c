@@ -164,14 +164,17 @@ void vp_set_threads(int count) {
     g_thread_count = count > 0 ? count : 0;
 }
 
+#ifndef VP_VVC_FRAME_CONTEXTS
+#define VP_VVC_FRAME_CONTEXTS 4
+#endif
+
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
     // VVC sizes its frame-context ring from av_cpu_count(), while its task
-    // executor uses dec->thread_count. Keep at most four picture working
-    // sets even when the executor has more workers.
-    const int max_frame_contexts = 4;
+    // executor uses dec->thread_count. Limit picture working sets
+    // independently of the number of workers.
     const int threads = dec->thread_count > 0 ? dec->thread_count : 1;
-    av_cpu_force_count(FFMIN(threads, max_frame_contexts));
+    av_cpu_force_count(FFMIN(threads, VP_VVC_FRAME_CONTEXTS));
     int ret = avcodec_open2(dec, codec, NULL);
     av_cpu_force_count(-1);
     return ret;

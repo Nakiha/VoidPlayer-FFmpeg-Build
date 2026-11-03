@@ -15,6 +15,7 @@ DIST_ROOT=""
 CLEAN=false
 SKIP_PACKAGE=false
 MT=false
+VVC_FRAME_CONTEXTS=4
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -24,6 +25,9 @@ while [[ $# -gt 0 ]]; do
         --dist-root)     DIST_ROOT="$2";  shift 2 ;;
         --clean)         CLEAN=true;      shift ;;
         --mt)            MT=true;         shift ;;
+        --vvc-frame-contexts)
+            [[ "${2:-}" =~ ^([1-9]|1[0-6])$ ]] || { echo "ERROR: --vvc-frame-contexts requires an integer from 1 to 16" >&2; exit 1; }
+            VVC_FRAME_CONTEXTS="$2"; shift 2 ;;
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
@@ -34,6 +38,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --clean              Wipe build directory before starting"
             echo "  --mt                 Multi-threaded core (pthreads + SharedArrayBuffer;"
             echo "                       requires COOP/COEP isolation on the host page)"
+            echo "  --vvc-frame-contexts N   Maximum in-flight VVC frame contexts (1-16, default 4)"
             echo "  --skip-package       Skip zip creation"
             exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -232,7 +237,7 @@ MT_LDFLAGS=()
 if $MT; then
     # Preload the requested workers before synchronous codec initialization.
     # Keep the historical pool size for hosts that omit the playback option.
-    MT_LDFLAGS=(-pthread '-sPTHREAD_POOL_SIZE=Math.max(1,Math.min(12,Module["vpPthreadPoolSize"]|0||4))')
+    MT_LDFLAGS=(-pthread -sMAXIMUM_MEMORY=4294967296 '-sPTHREAD_POOL_SIZE=Math.max(1,Math.min(12,Module["vpPthreadPoolSize"]|0||4))')
 fi
 
 step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_capabilities.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
@@ -243,7 +248,7 @@ step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm
     -sMODULARIZE=1 \
     -sEXPORT_ES6=1 \
     -sEXPORT_NAME=createVoidPlayerCore \
-    -sALLOW_MEMORY_GROWTH=1 \
+    -DVP_VVC_FRAME_CONTEXTS="$VVC_FRAME_CONTEXTS" -sALLOW_MEMORY_GROWTH=1 \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \

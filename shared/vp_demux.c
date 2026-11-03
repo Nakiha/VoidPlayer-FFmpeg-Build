@@ -10,13 +10,13 @@ EM_JS(long, vp_js_read, (int handle, double offset, uint8_t *buf, int len), {
             const bytes = Module.vpDemuxRead(-handle, offset, len);
             if (typeof bytes === 'number' && bytes < 0) return -1;
             if (!bytes || bytes.length > len) return -1;
-            HEAPU8.set(bytes, buf); return bytes.length;
+            HEAPU8.set(bytes, buf >>> 0); return bytes.length;
         }
         const entry = Module.vpBlobs && Module.vpBlobs.get(handle);
         if (!entry) return -1;
         const bytes = new Uint8Array(entry.reader.readAsArrayBuffer(entry.blob.slice(offset, offset + len)));
         if (bytes.length > len) return -1;
-        HEAPU8.set(bytes, buf); return bytes.length;
+        HEAPU8.set(bytes, buf >>> 0); return bytes.length;
     } catch (error) {
         // Never unwind a JS exception past an unreturned C allocation.
         // Hosts may preserve/rethrow the original failure after C unwinds.
