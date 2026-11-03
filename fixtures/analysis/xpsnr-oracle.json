@@ -1,0 +1,2206 @@
+{
+  "revision": "8998a1a670c81a04d144c36f9e2d3aa680c10720",
+  "filterSha256": "4b59b32eb4a501ac74f6d767a916ef1a29833e1895b150cfa96b8e4ffb91f3d7",
+  "binarySha256": "cd62a0819add8a660fd07b41d01fb21d9dada7ea7ca704e56e24dc7a149949a2",
+  "cpuFlags": 0,
+  "tolerance": 0.000051,
+  "precision": "official CLI emits four decimal places",
+  "cases": [
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "93f82323972ffed0d65f9ef4b80270c4f6ac19c734b22abc5bb67df4ea88d39c",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1141,
+            36.3065,
+            36.3065
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            30.9992,
+            30.9559,
+            30.9559
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            30.5564,
+            30.2356,
+            30.2356
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            30.5374,
+            31.1144,
+            31.1144
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            31.0551,
+            30.6196,
+            30.6196
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            30.4129,
+            30.2899,
+            30.2899
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            30.6579,
+            31.2146,
+            31.2146
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            31.0094,
+            30.5629,
+            30.5629
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            30.282,
+            30.3052,
+            30.3052
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            30.8384,
+            31.4075,
+            31.4075
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            31.0091,
+            30.3701,
+            30.3701
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            30.4792,
+            30.4941,
+            30.4941
+          ]
+        }
+      ],
+      "pooled": [
+        31.0504,
+        31.0314,
+        31.0314
+      ],
+      "statisticsSha256": "ddfd352b556bd144ea9637c9fe7604fb596059ded15cbbd608937a9f9a8cc50a"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "identical",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "near",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "d70422610c557ea9318bb2efb85e400e013b0aaa3380af9426fe07b4dee408a3",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            86.0153,
+            79.9947,
+            79.9947
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "7d494bca5049ba1465afe45aa1575b46cab9d3522e89dd29b63ebbdc32e88298"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "noise",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "93f82323972ffed0d65f9ef4b80270c4f6ac19c734b22abc5bb67df4ea88d39c",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1141,
+            36.3065,
+            36.3065
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            30.9992,
+            30.9559,
+            30.9559
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            30.5564,
+            30.2356,
+            30.2356
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            30.5374,
+            31.1144,
+            31.1144
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            31.0551,
+            30.6196,
+            30.6196
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            30.4129,
+            30.2899,
+            30.2899
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            30.6579,
+            31.2146,
+            31.2146
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            31.0094,
+            30.5629,
+            30.5629
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            30.282,
+            30.3052,
+            30.3052
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            30.8384,
+            31.4075,
+            31.4075
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            31.0091,
+            30.3701,
+            30.3701
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            30.4792,
+            30.4941,
+            30.4941
+          ]
+        }
+      ],
+      "pooled": [
+        31.0504,
+        31.0314,
+        31.0314
+      ],
+      "statisticsSha256": "ddfd352b556bd144ea9637c9fe7604fb596059ded15cbbd608937a9f9a8cc50a"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "identical",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "near",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "d70422610c557ea9318bb2efb85e400e013b0aaa3380af9426fe07b4dee408a3",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            86.0153,
+            79.9947,
+            79.9947
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "7d494bca5049ba1465afe45aa1575b46cab9d3522e89dd29b63ebbdc32e88298"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "93f82323972ffed0d65f9ef4b80270c4f6ac19c734b22abc5bb67df4ea88d39c",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1141,
+            36.3065,
+            36.3065
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            35.8335,
+            35.8858,
+            35.8858
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            26.8423,
+            27.0803,
+            27.0803
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            26.8831,
+            27.8346,
+            27.8346
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            28.358,
+            27.0822,
+            27.0822
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            26.7911,
+            27.3222,
+            27.3222
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            27.3326,
+            27.9211,
+            27.9211
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            28.3188,
+            27.2263,
+            27.2263
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            26.5277,
+            26.9285,
+            26.9285
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            27.6776,
+            28.5983,
+            28.5983
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            28.3409,
+            27.0682,
+            27.0682
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            26.883,
+            27.3661,
+            27.3661
+          ]
+        }
+      ],
+      "pooled": [
+        28.33,
+        28.3945,
+        28.3945
+      ],
+      "statisticsSha256": "ed443eea50b6abacb4f7ed0b7b30e07b812a14c4a91e250aded09d1803ab17a2"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "identical",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 8,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "near",
+      "referenceSha256": "77cdd7dbfb6fa103b9804332ed3ab5154576a6003869a4210f871249f6d5aa40",
+      "distortedSha256": "d70422610c557ea9318bb2efb85e400e013b0aaa3380af9426fe07b4dee408a3",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            86.0153,
+            79.9947,
+            79.9947
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "7d494bca5049ba1465afe45aa1575b46cab9d3522e89dd29b63ebbdc32e88298"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "5f23abfc4df890bbef1acf4e52aedee3880ed3b762e959e86e612eb262d02573",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1809,
+            36.3726,
+            36.3726
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            31.1626,
+            31.1381,
+            31.1381
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            30.7504,
+            30.4197,
+            30.4197
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            30.7306,
+            31.2864,
+            31.2864
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            31.2172,
+            30.8178,
+            30.8178
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            30.6196,
+            30.4785,
+            30.4785
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            30.8429,
+            31.3918,
+            31.3918
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            31.1702,
+            30.7471,
+            30.7471
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            30.4959,
+            30.5016,
+            30.5016
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            31.016,
+            31.5762,
+            31.5762
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            31.1687,
+            30.5581,
+            30.5581
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            30.6697,
+            30.6755,
+            30.6755
+          ]
+        }
+      ],
+      "pooled": [
+        31.2279,
+        31.2101,
+        31.2101
+      ],
+      "statisticsSha256": "bea7e88097481f067507bc83e9db6f8561e0426f6f48e67833b6e7a9e06c73d3"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "identical",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "near",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "cf382b0c96da47ec4427871cd5ed79563dfdbe4fee358bd4e8df8db50088934d",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            98.082,
+            92.0614,
+            92.0614
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "9198b15bff67a2582f25360f0eecbe4fde6b679c7aa2970cb9578d1a147eea70"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "noise",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "5f23abfc4df890bbef1acf4e52aedee3880ed3b762e959e86e612eb262d02573",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1809,
+            36.3726,
+            36.3726
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            31.1626,
+            31.1381,
+            31.1381
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            30.7504,
+            30.4197,
+            30.4197
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            30.7306,
+            31.2864,
+            31.2864
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            31.2172,
+            30.8178,
+            30.8178
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            30.6196,
+            30.4785,
+            30.4785
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            30.8429,
+            31.3918,
+            31.3918
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            31.1702,
+            30.7471,
+            30.7471
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            30.4959,
+            30.5016,
+            30.5016
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            31.016,
+            31.5762,
+            31.5762
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            31.1687,
+            30.5581,
+            30.5581
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            30.6697,
+            30.6755,
+            30.6755
+          ]
+        }
+      ],
+      "pooled": [
+        31.2279,
+        31.2101,
+        31.2101
+      ],
+      "statisticsSha256": "bea7e88097481f067507bc83e9db6f8561e0426f6f48e67833b6e7a9e06c73d3"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "identical",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 30000,
+        "denominator": 1001
+      },
+      "distortion": "near",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "cf382b0c96da47ec4427871cd5ed79563dfdbe4fee358bd4e8df8db50088934d",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            98.082,
+            92.0614,
+            92.0614
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "9198b15bff67a2582f25360f0eecbe4fde6b679c7aa2970cb9578d1a147eea70"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "5f23abfc4df890bbef1acf4e52aedee3880ed3b762e959e86e612eb262d02573",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            36.1809,
+            36.3726,
+            36.3726
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            35.9056,
+            35.9593,
+            35.9593
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            27.2583,
+            27.3806,
+            27.3806
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            27.2351,
+            28.3696,
+            28.3696
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            28.8748,
+            27.5275,
+            27.5275
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            27.1539,
+            27.6144,
+            27.6144
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            27.7034,
+            28.416,
+            28.416
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            28.7078,
+            27.55,
+            27.55
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            26.8493,
+            27.2307,
+            27.2307
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            28.0709,
+            28.9974,
+            28.9974
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            28.7423,
+            27.4468,
+            27.4468
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            27.3153,
+            27.7345,
+            27.7345
+          ]
+        }
+      ],
+      "pooled": [
+        28.7005,
+        28.754,
+        28.754
+      ],
+      "statisticsSha256": "2186d0acb3807aabd860207bf19e2a9f112b0134f6c32c2e90606e7e97d75c75"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "identical",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "ecffbcd63b96c986dff6ddbfdc67d270ee7035ad6302c270e3c8ce081b6b8664"
+    },
+    {
+      "width": 128,
+      "height": 96,
+      "frames": 12,
+      "depth": 10,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "near",
+      "referenceSha256": "4b18748c56a977d5dab16a02efa3bb3a02d3b2957f669f48b70758ed8e588494",
+      "distortedSha256": "cf382b0c96da47ec4427871cd5ed79563dfdbe4fee358bd4e8df8db50088934d",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            98.082,
+            92.0614,
+            92.0614
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 3,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 4,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 5,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 6,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 7,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 8,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 9,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 10,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        },
+        {
+          "index": 11,
+          "planes": [
+            "inf",
+            "inf",
+            "inf"
+          ]
+        }
+      ],
+      "pooled": [
+        "inf",
+        "inf",
+        "inf"
+      ],
+      "statisticsSha256": "9198b15bff67a2582f25360f0eecbe4fde6b679c7aa2970cb9578d1a147eea70"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "frames": 3,
+      "depth": 10,
+      "rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "37c9bc7199e931ac551cedaa217076e59da05409449aa8ce97caa40c4a3e50cb",
+      "distortedSha256": "cac64e4c226368d33cd982c30bc8f40955187d6d3d44b48905a1b63ab85ea613",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            42.7386,
+            42.7387,
+            42.7387
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            42.74,
+            42.7616,
+            42.7616
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            40.1259,
+            40.1008,
+            40.1008
+          ]
+        }
+      ],
+      "pooled": [
+        41.7781,
+        41.7745,
+        41.7745
+      ],
+      "statisticsSha256": "32c429ff37627bd0b6f0a58e99e1f3fb4de16025cd6301e5e00a5c49158d27a6"
+    },
+    {
+      "width": 4096,
+      "height": 2304,
+      "frames": 3,
+      "depth": 8,
+      "rate": {
+        "numerator": 24,
+        "denominator": 1
+      },
+      "distortion": "noise",
+      "referenceSha256": "f2e07e1587ef47b1841c8841ac9b6ac7e6d1c74f67404e852053fc4549b030ca",
+      "distortedSha256": "083f064463ad7c27fcd0701944d97aed573565aa737f10c5a543ca3d8ae5cae4",
+      "framesExpected": [
+        {
+          "index": 0,
+          "planes": [
+            44.9428,
+            44.9428,
+            44.9428
+          ]
+        },
+        {
+          "index": 1,
+          "planes": [
+            42.6554,
+            42.6656,
+            42.6656
+          ]
+        },
+        {
+          "index": 2,
+          "planes": [
+            42.663,
+            42.6512,
+            42.6512
+          ]
+        }
+      ],
+      "pooled": [
+        43.3558,
+        43.3552,
+        43.3552
+      ],
+      "statisticsSha256": "1db490c002ac79094e6e13f2a0e7ddd7eabed5ed0eed0f75c03ca79248964c52"
+    }
+  ]
+}

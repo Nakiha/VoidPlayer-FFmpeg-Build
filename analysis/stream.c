@@ -2,6 +2,11 @@
  * One context per WASM instance. Records seal only on avcodec_receive_frame;
  * decoder reference frames remain owned by FFmpeg after records are taken. */
 #include <math.h>
+#ifdef __EMSCRIPTEN_PTHREADS__
+#include <pthread.h>
+#include <stdatomic.h>
+#include "libavutil/cpu.h"
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +38,26 @@ static Picture pictures[MAX_PICTURES];
 static AVCodecContext *decoder;
 static AVFrame *frame;
 static size_t allocated;
+#ifdef __EMSCRIPTEN_PTHREADS__
+static atomic_int failure;
+static pthread_mutex_t collector = PTHREAD_MUTEX_INITIALIZER;
+#define LOCK_COLLECTOR() pthread_mutex_lock(&collector)
+#define UNLOCK_COLLECTOR() pthread_mutex_unlock(&collector)
+static int vvc_threads = 1, vvc_contexts = 1;
+int vpa_configure_threads(int threads, int contexts);
+
+int vpa_configure_threads(int threads, int contexts) {
+    if (decoder) return AVERROR(EBUSY);
+    if (threads < 1 || threads > 4 || contexts < 1 || contexts > threads) return AVERROR(EINVAL);
+    vvc_threads = threads;
+    vvc_contexts = contexts;
+    return 0;
+}
+#else
 static int failure;
+#define LOCK_COLLECTOR() ((void)0)
+#define UNLOCK_COLLECTOR() ((void)0)
+#endif
 static Picture *ready;
 static int execution_mode;
 static Picture *find(uintptr_t id,int create) {
@@ -43,7 +67,7 @@ static Picture *find(uintptr_t id,int create) {
     failure=AVERROR(ENOMEM); return NULL;
 }
 static void release(Picture *p) { if(!p)return; allocated-=p->capacity*sizeof(Block);free(p->blocks);memset(p,0,sizeof(*p)); }
-static void append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint8_t qp,uint8_t mode,uint8_t depth) {
+static void append_locked(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint8_t qp,uint8_t mode,uint8_t depth) {
     if(!decoder||failure)return;
     if(info->width>4096||info->height>2304){failure=AVERROR(ENOMEM);return;}
     Picture *p=find(info->frame_identity,1); if(!p)return;
@@ -62,13 +86,19 @@ static void append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,
 }
 /* Active slice reference lists, unioned across slices. Opaque source IDs avoid
  * POC wrap/reset ambiguity. These are candidates, not per-block MV usage. */
-void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list) {
+static void reference_locked(uintptr_t id, uintptr_t ref, int list) {
     if(!decoder||failure)return;
     Picture *p=find(id,1);if(!p)return;
+    if(p->sealed){failure=AVERROR_INVALIDDATA;return;}
     if(!ref||ref==id||ref>2000000||list<0||list>1){p->refs_invalid=1;return;}
     for(unsigned i=0;i<p->ref_count;i++)if(p->refs[2*i]==ref-1&&p->refs[2*i+1]==list)return;
     if(p->ref_count>=64){p->refs_invalid=1;return;}
     p->refs[2*p->ref_count]=ref-1;p->refs[2*p->ref_count+1]=list;p->ref_count++;
+}
+void ff_vpa_reference(uintptr_t id, uintptr_t ref, int list) {
+    LOCK_COLLECTOR();
+    reference_locked(id,ref,list);
+    UNLOCK_COLLECTOR();
 }
 int vpa_reference_abi(void){return 1;}
 int vpa_ref_count(void){return ready?ready->ref_count:0;}
@@ -77,14 +107,14 @@ int vpa_refs_invalid(void){return !ready||ready->refs_invalid;}
 int vpa_picture_type(void){return ready?ready->type:-1;}
 int vpa_poc(void){return ready?ready->poc:0;}
 int ff_voidplayer_vachunk_is_active(void){return decoder!=NULL&&!failure;}
-void ff_voidplayer_vachunk_write_intra_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t intra,uint8_t mip,uint8_t isp,uint32_t bits){append(i,x,y,w,h,q,1,d);if(intra==255){Picture *p=find(i->frame_identity,0);if(p)p->invalid=1;}}
-void ff_voidplayer_vachunk_write_inter_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){append(i,x,y,w,h,q,skip?3:2,d);}
-void ff_voidplayer_vachunk_write_h264_mb(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t q,uint8_t intra,uint8_t im,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){append(i,x,y,(uint16_t)(i->width-x<16?i->width-x:16),(uint16_t)(i->height-y<16?i->height-y:16),q,intra?1:skip?3:2,0);}
+void ff_voidplayer_vachunk_write_intra_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t intra,uint8_t mip,uint8_t isp,uint32_t bits){LOCK_COLLECTOR();append_locked(i,x,y,w,h,q,1,d);if(intra==255){Picture *p=find(i->frame_identity,0);if(p&&!p->sealed)p->invalid=1;}UNLOCK_COLLECTOR();}
+void ff_voidplayer_vachunk_write_inter_cu(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t d,uint8_t q,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){LOCK_COLLECTOR();append_locked(i,x,y,w,h,q,skip?3:2,d);UNLOCK_COLLECTOR();}
+void ff_voidplayer_vachunk_write_h264_mb(const VoidPlayerVachunkFrameInfo *i,uint16_t x,uint16_t y,uint8_t q,uint8_t intra,uint8_t im,uint8_t skip,uint8_t merge,uint8_t dir,int16_t x0,int16_t y0,int16_t x1,int16_t y1,int8_t r0,int8_t r1,uint32_t bits){LOCK_COLLECTOR();append_locked(i,x,y,(uint16_t)(i->width-x<16?i->width-x:16),(uint16_t)(i->height-y<16?i->height-y:16),q,intra?1:skip?3:2,0);UNLOCK_COLLECTOR();}
 int ff_voidplayer_vachunk_write_frame_summary(const VoidPlayerVachunkFrameInfo *i){return 0;}
 uint32_t ff_voidplayer_vachunk_frame_count(void){return 0;}
 uint32_t ff_voidplayer_vachunk_last_frame_cu_count(void){return 0;}
 int vpa_abi(void){return 1;}
-void vpa_close(void){ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);avcodec_free_context(&decoder);failure=0;execution_mode=0;}
+void vpa_close(void){AVCodecContext *closing=decoder;avcodec_free_context(&closing);decoder=NULL;ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);failure=0;execution_mode=0;}
 int vpa_execution_abi(void){return 1;}
 int vpa_execution_retry_code(void){return VP_ANALYSIS_RETRY_FULL;}
 int vpa_execution_mode(int mode){if(decoder)return AVERROR(EBUSY);if(mode<0||mode>1)return AVERROR(EINVAL);execution_mode=mode;return 0;}
@@ -98,6 +128,9 @@ int vpa_open(int codec,const uint8_t *extra,int size){
     const AVCodec *c=avcodec_find_decoder(id);if(!c)return AVERROR_DECODER_NOT_FOUND;
     decoder=avcodec_alloc_context3(c);frame=av_frame_alloc();if(!decoder||!frame){vpa_close();return AVERROR(ENOMEM);}
     decoder->thread_count=1;decoder->thread_type=0;decoder->pkt_timebase=(AVRational){1,1000000};
+#ifdef __EMSCRIPTEN_PTHREADS__
+    if(id==AV_CODEC_ID_VVC)decoder->thread_count=vvc_threads;
+#endif
     decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;decoder->err_recognition=AV_EF_EXPLODE|AV_EF_CAREFUL;
     decoder->max_pixels=4096*2304;
 #if VP_ANALYSIS_H264_SKIP_LOOP_FILTER
@@ -109,7 +142,14 @@ int vpa_open(int codec,const uint8_t *extra,int size){
     if(size){decoder->extradata=av_mallocz(size+AV_INPUT_BUFFER_PADDING_SIZE);if(!decoder->extradata){vpa_close();return AVERROR(ENOMEM);}memcpy(decoder->extradata,extra,size);decoder->extradata_size=size;}
     AVDictionary *options=NULL;
     if((id==AV_CODEC_ID_HEVC||id==AV_CODEC_ID_VVC)&&execution_mode)av_dict_set_int(&options,"vp_analysis_mode",execution_mode,0);
+#ifdef __EMSCRIPTEN_PTHREADS__
+    // This pinned VVC decoder derives its delayed-frame limit at open.
+    if(id==AV_CODEC_ID_VVC)av_cpu_force_count(vvc_contexts);
+#endif
     int ret=avcodec_open2(decoder,c,&options);
+#ifdef __EMSCRIPTEN_PTHREADS__
+    if(id==AV_CODEC_ID_VVC)av_cpu_force_count(-1);
+#endif
     if(ret>=0&&av_dict_count(options))ret=AVERROR(ENOSYS);
     av_dict_free(&options);if(ret<0)vpa_close();return ret;
 }
@@ -125,18 +165,21 @@ int vpa_feed_known(const uint8_t *bytes,int size,double pts,double dts,int known
 }
 int vpa_feed(const uint8_t *bytes,int size,double pts,double dts,int ordinal){return vpa_feed_known(bytes,size,pts,dts,3,ordinal);}
 int vpa_drain(void){if(!decoder)return AVERROR(EINVAL);int ret=avcodec_send_packet(decoder,NULL);return ret==AVERROR(EAGAIN)?2:ret;}
-/* Successful decoder output is picture-complete for the single-thread build.
+/* Successful decoder output is picture-complete.
  * Mark corrupt/field frames invalid. Legacy CU QP bytes remain clipped unsigned
  * values; consumers retain unsupported/null QP for high-depth output. */
 int vpa_step(void){
     if(!decoder)return AVERROR(EINVAL);if(failure)return failure;if(ready)return 1;
     int ret=avcodec_receive_frame(decoder,frame);if(ret==AVERROR(EAGAIN))return 0;if(ret==AVERROR_EOF)return 2;if(ret<0)return ret;
+    LOCK_COLLECTOR();
+    if(failure){UNLOCK_COLLECTOR();av_frame_unref(frame);return failure;}
     Picture *p=find((uintptr_t)frame->opaque,0);
-    if(!p){av_frame_unref(frame);return AVERROR_INVALIDDATA;}
+    if(!p){UNLOCK_COLLECTOR();av_frame_unref(frame);return AVERROR_INVALIDDATA;}
     const AVPixFmtDescriptor *fmt=av_pix_fmt_desc_get(frame->format);
     p->invalid|=frame->decode_error_flags!=0||(frame->flags&AV_FRAME_FLAG_CORRUPT)||(frame->flags&AV_FRAME_FLAG_INTERLACED)||!fmt;
     p->depth=fmt?fmt->comp[0].depth:0;
     p->sealed=1;p->pts=frame->pts;
+    UNLOCK_COLLECTOR();
     if(vpa_block_sort(p->blocks,p->count,p->capacity,p->width,p->height)<0){av_frame_unref(frame);failure=AVERROR_INVALIDDATA;return failure;}ready=p;
     av_frame_unref(frame);return 1;
 }
@@ -148,5 +191,5 @@ int vpa_height(void){return ready?ready->height:0;}
 int vpa_depth(void){return ready?ready->depth:0;}
 int vpa_invalid(void){return !ready||ready->invalid||!ready->count;}
 double vpa_pts(void){return ready?(double)ready->pts:0;}
-int vpa_take(int maxBytes){if(!ready)return 0;if(maxBytes<0||ready->count*sizeof(Block)>(unsigned)maxBytes)return AVERROR(ENOMEM);int count=ready->count;release(ready);ready=NULL;return count;}
-int vpa_record_bytes(void){return allocated;}
+int vpa_take(int maxBytes){if(!ready)return 0;if(maxBytes<0||ready->count*sizeof(Block)>(unsigned)maxBytes)return AVERROR(ENOMEM);int count=ready->count;LOCK_COLLECTOR();release(ready);ready=NULL;UNLOCK_COLLECTOR();return count;}
+int vpa_record_bytes(void){LOCK_COLLECTOR();int bytes=allocated;UNLOCK_COLLECTOR();return bytes;}
