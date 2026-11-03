@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${ANALYSIS_BUILD_ROOT:-$ROOT/.build/analysis}"
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
-REV=15f8ff5c4e9ddf48e038bfb1b10d15e1301ac2bd
+REV=76612ed52d5f07552390805854e8f1b0bf4c2ec5
 VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi
