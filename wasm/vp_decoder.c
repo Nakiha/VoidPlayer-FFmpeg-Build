@@ -157,6 +157,7 @@ static size_t vp_index_lower_bound(const VPContext *ctx, int64_t ticks) {
 }
 
 static int g_thread_count = 0;
+static int g_vvc_thread_count = 0;
 
 // Player-assigned decode thread budget for the NEXT vp_open on this context's
 // decoder. Keep this independent of the logical CPU count exposed by the host.
@@ -164,8 +165,12 @@ void vp_set_threads(int count) {
     g_thread_count = count > 0 ? count : 0;
 }
 
+void vp_set_vvc_threads(int count) {
+    g_vvc_thread_count = count > 0 ? count : 0;
+}
+
 #ifndef VP_VVC_FRAME_CONTEXTS
-#define VP_VVC_FRAME_CONTEXTS 4
+#define VP_VVC_FRAME_CONTEXTS 6
 #endif
 
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
@@ -266,7 +271,8 @@ static int vp_open_decoders(VPContext *ctx) {
 #ifdef VP_MT
     // Player-managed thread budget: fall back to the host's core count when
     // the player did not assign one.
-    ctx->dec->thread_count = g_thread_count > 0 ? g_thread_count : emscripten_num_logical_cores();
+    int threads = codec->id == AV_CODEC_ID_VVC && g_vvc_thread_count ? g_vvc_thread_count : g_thread_count;
+    ctx->dec->thread_count = threads > 0 ? threads : emscripten_num_logical_cores();
 #endif
     AVStream *stream = ctx->fmt->streams[ctx->stream_idx];
     if (avcodec_parameters_to_context(ctx->dec, stream->codecpar) < 0) return VP_ERR;
