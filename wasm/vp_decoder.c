@@ -10,6 +10,7 @@
 #include <libavformat/avio.h>
 #include <libavutil/avutil.h>
 #include <libavutil/cpu.h>
+#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
@@ -169,18 +170,22 @@ void vp_set_vvc_threads(int count) {
     g_vvc_thread_count = count > 0 ? count : 0;
 }
 
-#ifndef VP_VVC_FRAME_CONTEXTS
-#define VP_VVC_FRAME_CONTEXTS 6
-#endif
+static int g_vvc_frame_contexts = 0;
+
+void vp_set_vvc_frame_contexts(int count) {
+    g_vvc_frame_contexts = count > 0 ? count : 0;
+}
 
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
-    // VVC sizes its frame-context ring from av_cpu_count(), while its task
-    // executor uses dec->thread_count. Limit picture working sets
-    // independently of the number of workers.
     const int threads = dec->thread_count > 0 ? dec->thread_count : 1;
-    av_cpu_force_count(FFMIN(threads, VP_VVC_FRAME_CONTEXTS));
-    int ret = avcodec_open2(dec, codec, NULL);
+    const int contexts = g_vvc_frame_contexts ? g_vvc_frame_contexts : threads;
+    int ret = codec->priv_class ? av_opt_set_int(dec->priv_data, "frame_contexts", contexts, 0) : AVERROR_OPTION_NOT_FOUND;
+    if (ret != AVERROR_OPTION_NOT_FOUND || g_vvc_frame_contexts)
+        return ret < 0 ? ret : avcodec_open2(dec, codec, NULL);
+    // Standalone builds can still use unpatched upstream FFmpeg.
+    av_cpu_force_count(contexts);
+    ret = avcodec_open2(dec, codec, NULL);
     av_cpu_force_count(-1);
     return ret;
 }

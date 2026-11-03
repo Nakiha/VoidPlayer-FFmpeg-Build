@@ -15,7 +15,6 @@ DIST_ROOT=""
 CLEAN=false
 SKIP_PACKAGE=false
 MT=false
-VVC_FRAME_CONTEXTS=6
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -25,9 +24,6 @@ while [[ $# -gt 0 ]]; do
         --dist-root)     DIST_ROOT="$2";  shift 2 ;;
         --clean)         CLEAN=true;      shift ;;
         --mt)            MT=true;         shift ;;
-        --vvc-frame-contexts)
-            [[ "${2:-}" =~ ^([1-9]|1[0-6])$ ]] || { echo "ERROR: --vvc-frame-contexts requires an integer from 1 to 16" >&2; exit 1; }
-            VVC_FRAME_CONTEXTS="$2"; shift 2 ;;
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
@@ -38,7 +34,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --clean              Wipe build directory before starting"
             echo "  --mt                 Multi-threaded core (pthreads + SharedArrayBuffer;"
             echo "                       requires COOP/COEP isolation on the host page)"
-            echo "  --vvc-frame-contexts N   Maximum in-flight VVC frame contexts (1-16, default 6)"
             echo "  --skip-package       Skip zip creation"
             exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -237,7 +232,7 @@ MT_LDFLAGS=()
 if $MT; then
     # Preload the requested workers before synchronous codec initialization.
     # Keep the historical pool size for hosts that omit the playback option.
-    MT_LDFLAGS=(-pthread -sMAXIMUM_MEMORY=4294967296 '-sPTHREAD_POOL_SIZE=Math.max(1,Math.min(12,Module["vpPthreadPoolSize"]|0||4))')
+    MT_LDFLAGS=(-pthread -sMAXIMUM_MEMORY=4294967296 '-sPTHREAD_POOL_SIZE=Module["vpPthreadPoolSize"] ?? 4')
 fi
 
 step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm/vp_decoder.c" "$REPO_ROOT/shared/vp_demux.c" "$REPO_ROOT/shared/vp_capabilities.c" "$REPO_ROOT/shared/vp_parser_timing.c" -Wl,--wrap=av_parser_parse2 \
@@ -248,11 +243,11 @@ step emcc "-O$WASM_LINK_OPT_LEVEL" ${SIMD_CFLAGS:+$SIMD_CFLAGS} "$REPO_ROOT/wasm
     -sMODULARIZE=1 \
     -sEXPORT_ES6=1 \
     -sEXPORT_NAME=createVoidPlayerCore \
-    -DVP_VVC_FRAME_CONTEXTS="$VVC_FRAME_CONTEXTS" -sALLOW_MEMORY_GROWTH=1 \
+    -sALLOW_MEMORY_GROWTH=1 \
     -sFORCE_FILESYSTEM=1 \
     -sSTACK_SIZE=4194304 \
     ${MT_LDFLAGS[@]+"${MT_LDFLAGS[@]}"} \
-    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_set_vvc_threads,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_frame_interlaced,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_open_config,_vp_packet_config_bytes,_vp_packet_alloc,_vp_packet_send,_vp_packet_try_send,_vp_packet_receive,_vp_packet_reset,_vp_packet_identity_abi,_vp_packet_identity_capacity,_vp_packet_open_identity,_vp_packet_send_identity,_vp_packet_identity_info,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vp_capability_abi,_vp_build_id,_vp_demuxer_count,_vp_demuxer_name,_vp_decoder_count,_vp_decoder_name \
+    -sEXPORTED_FUNCTIONS=_malloc,_free,_vp_create,_vp_destroy,_vp_set_threads,_vp_set_vvc_threads,_vp_set_vvc_frame_contexts,_vp_open,_vp_open_blob,_vp_close_input,_vp_width,_vp_height,_vp_tb_num,_vp_tb_den,_vp_codec_name,_vp_pixel_format,_vp_color_primaries,_vp_color_transfer,_vp_color_space,_vp_color_range,_vp_index_build,_vp_index_scan_begin,_vp_index_scan_stream_begin,_vp_index_scan_step,_vp_index_scan_complete,_vp_index_scan_failed,_vp_index_recovery_abi_version,_vp_index_integrity,_vp_index_truncated_at,_vp_index_end_dts,_vp_index_apply_prefix,_vp_index_scan_packets,_vp_index_scan_decoded_packets,_vp_index_scan_bytes,_vp_index_scan_progressive_supported,_vp_index_scan_stable_count,_vp_index_scan_stable_ticks,_vp_index_count,_vp_index_seek_anchors,_vp_extract_frames,_vp_extract_restarts,_vp_index_ticks,_vp_index_is_key,_vp_index_duration,_vp_index_abi_version,_vp_index_stream_abi_version,_vp_index_record_bytes,_vp_index_export_bytes,_vp_index_export_range,_vp_index_export,_vp_index_import_begin,_vp_index_import_batch,_vp_index_import,_vp_core_build_id,_vp_stream_index,_vp_prime_first_presentable,_vp_extract,_vp_last_ticks,_vp_frame_interlaced,_vp_pixels,_vp_frame_info,_vp_frame_format,_vp_packet_open,_vp_packet_open_config,_vp_packet_config_bytes,_vp_packet_alloc,_vp_packet_send,_vp_packet_try_send,_vp_packet_receive,_vp_packet_reset,_vp_packet_identity_abi,_vp_packet_identity_capacity,_vp_packet_open_identity,_vp_packet_send_identity,_vp_packet_identity_info,_vp_picture_abi_version,_vp_picture_info,_vp_identity_config_bytes,_vp_identity_config,_vp_capability_abi,_vp_build_id,_vp_demuxer_count,_vp_demuxer_name,_vp_decoder_count,_vp_decoder_name \
     -sEXPORTED_RUNTIME_METHODS=FS,ccall,cwrap,HEAPU8 \
     -o "$PACKAGE_ROOT/voidplayer-core${SUFFIX}.js"
 
