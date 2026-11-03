@@ -1332,13 +1332,23 @@ uint8_t *vp_packet_alloc(VPContext *ctx, int size) {
     return ctx->pkt->data;
 }
 
-int vp_packet_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
-    if (!ctx || !ctx->dec || ctx->packet_identity_mode) return VP_ERR;
+// 0: accepted; 1: receive output, then retry with the same packet;
+// negative: FFmpeg error. Keep the allocated packet only on backpressure.
+int vp_packet_try_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
+    if (!ctx || !ctx->dec || ctx->packet_identity_mode) return AVERROR(EINVAL);
     ctx->pkt->pts = pts; ctx->pkt->dts = dts;
     ctx->pkt->flags = key ? AV_PKT_FLAG_KEY : 0;
     int ret = avcodec_send_packet(ctx->dec, eof ? NULL : ctx->pkt);
+    if (ret == AVERROR(EAGAIN)) return 1;
     av_packet_unref(ctx->pkt);
-    return ret < 0 ? VP_ERR : 0;
+    return ret;
+}
+
+// Preserve the original status and packet ownership for existing consumers.
+int vp_packet_send(VPContext *ctx, int64_t pts, int64_t dts, int key, int eof) {
+    int ret = vp_packet_try_send(ctx, pts, dts, key, eof);
+    if (ret == 1) av_packet_unref(ctx->pkt);
+    return ret == 0 ? 0 : VP_ERR;
 }
 
 int vp_packet_receive(VPContext *ctx, int64_t minimum_pts) {
