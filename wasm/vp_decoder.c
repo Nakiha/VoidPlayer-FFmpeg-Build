@@ -9,6 +9,7 @@
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
 #include <libavutil/avutil.h>
+#include <libavutil/cpu.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
@@ -158,10 +159,21 @@ static size_t vp_index_lower_bound(const VPContext *ctx, int64_t ticks) {
 static int g_thread_count = 0;
 
 // Player-assigned decode thread budget for the NEXT vp_open on this context's
-// decoder. av_cpu_count() always reports 1 under Emscripten, so without this
-// every decoder would silently run single-threaded.
+// decoder. Keep this independent of the logical CPU count exposed by the host.
 void vp_set_threads(int count) {
     g_thread_count = count > 0 ? count : 0;
+}
+
+static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
+    if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
+    // VVC independently sizes its frame-context ring from av_cpu_count().
+    // In a playback Worker, bound the ring by the assigned decoder threads:
+    // 4K frame working sets can exhaust Wasm memory long before the host
+    // CPU-count-based ring produces its first frame.
+    av_cpu_force_count(dec->thread_count > 0 ? dec->thread_count : 1);
+    int ret = avcodec_open2(dec, codec, NULL);
+    av_cpu_force_count(-1);
+    return ret;
 }
 
 VPContext *vp_create(void) {
@@ -262,7 +274,7 @@ static int vp_open_decoders(VPContext *ctx) {
         if(!ctx->identity_admission)return VP_ERR;
         if(ctx->dec->extradata_size)vp_h264_admit(ctx->identity_admission,ctx->dec->extradata,ctx->dec->extradata_size);
     }
-    if (avcodec_open2(ctx->dec, codec, NULL) < 0) return VP_ERR;
+    if (vp_open_codec(ctx->dec, codec) < 0) return VP_ERR;
     vp_reset_decoder_state(ctx);
     // Prime the decoder with real frames: streams like MPEG-2 in TS keep the
     // sequence header (dimensions) in the bitstream, and the decoder must see
@@ -1259,7 +1271,7 @@ static int vp_packet_open_internal(VPContext *ctx, const char *name, const uint8
         memcpy(ctx->dec->extradata, extra, size);
         ctx->dec->extradata_size = size;
     }
-    return avcodec_open2(ctx->dec, codec, NULL) < 0 ? VP_ERR : 0;
+    return vp_open_codec(ctx->dec, codec) < 0 ? VP_ERR : 0;
 }
 int vp_packet_open_config(VPContext *ctx, const char *name, const uint8_t *extra, int size, const VPPacketConfig *config) {
     return vp_packet_open_internal(ctx,name,extra,size,config,0);
