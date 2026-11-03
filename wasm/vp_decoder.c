@@ -166,11 +166,12 @@ void vp_set_threads(int count) {
 
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
-    // VVC independently sizes its frame-context ring from av_cpu_count().
-    // In a playback Worker, bound the ring by the assigned decoder threads:
-    // 4K frame working sets can exhaust Wasm memory long before the host
-    // CPU-count-based ring produces its first frame.
-    av_cpu_force_count(dec->thread_count > 0 ? dec->thread_count : 1);
+    // VVC sizes its frame-context ring from av_cpu_count(), while its task
+    // executor uses dec->thread_count. Keep at most four picture working
+    // sets even when the executor has more workers.
+    const int max_frame_contexts = 4;
+    const int threads = dec->thread_count > 0 ? dec->thread_count : 1;
+    av_cpu_force_count(FFMIN(threads, max_frame_contexts));
     int ret = avcodec_open2(dec, codec, NULL);
     av_cpu_force_count(-1);
     return ret;
