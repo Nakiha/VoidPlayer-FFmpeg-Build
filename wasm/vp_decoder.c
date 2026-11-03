@@ -183,7 +183,9 @@ void vp_set_vvc_frame_contexts(int count) {
 static int g_vvc_frame_context_capacity;
 
 void vp_set_vvc_frame_context_capacity(int count) {
+#if defined(VP_MT) && defined(VP_VVC_TUNING)
     g_vvc_frame_context_capacity = count > 0 ? count : 0;
+#endif
 }
 
 int vp_grow_vvc_frame_contexts(VPContext *ctx, int count) {
@@ -193,6 +195,30 @@ int vp_grow_vvc_frame_contexts(VPContext *ctx, int count) {
     return AVERROR(ENOSYS);
 }
 
+static int g_vvc_thread_capacity;
+
+void vp_set_vvc_thread_capacity(int count) {
+#if defined(VP_MT) && defined(VP_VVC_TUNING)
+    g_vvc_thread_capacity = count > 0 ? count : 0;
+#endif
+}
+
+int vp_grow_vvc_threads(VPContext *ctx, int count) {
+#if defined(VP_MT) && defined(VP_VVC_TUNING)
+    if (ctx && ctx->dec) return avcodec_vvc_grow_threads(ctx->dec, count);
+#endif
+    return AVERROR(ENOSYS);
+}
+
+const void *vp_vvc_tuning(VPContext *ctx) {
+#if defined(VP_MT) && defined(VP_VVC_TUNING)
+    static AVVvcTuning stats;
+    _Static_assert(sizeof(stats) == 32, "VVC tuning ABI");
+    if (ctx && ctx->dec && !avcodec_vvc_tuning(ctx->dec, &stats)) return &stats;
+#endif
+    return NULL;
+}
+
 static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     if (codec->id != AV_CODEC_ID_VVC) return avcodec_open2(dec, codec, NULL);
     const int threads = dec->thread_count > 0 ? dec->thread_count : 1;
@@ -200,6 +226,8 @@ static int vp_open_codec(AVCodecContext *dec, const AVCodec *codec) {
     int ret = codec->priv_class ? av_opt_set_int(dec->priv_data, "frame_contexts", contexts, 0) : AVERROR_OPTION_NOT_FOUND;
     if (ret >= 0 && g_vvc_frame_context_capacity)
         ret = av_opt_set_int(dec->priv_data, "frame_context_capacity", g_vvc_frame_context_capacity, 0);
+    if (ret >= 0 && g_vvc_thread_capacity)
+        ret = av_opt_set_int(dec->priv_data, "thread_capacity", g_vvc_thread_capacity, 0);
     if (ret != AVERROR_OPTION_NOT_FOUND || g_vvc_frame_contexts)
         return ret < 0 ? ret : avcodec_open2(dec, codec, NULL);
     // Standalone builds can still use unpatched upstream FFmpeg.
