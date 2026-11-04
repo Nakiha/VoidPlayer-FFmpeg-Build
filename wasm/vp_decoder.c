@@ -205,9 +205,29 @@ void vp_set_vvc_thread_capacity(int count) {
 
 int vp_grow_vvc_threads(VPContext *ctx, int count) {
 #if defined(VP_MT) && defined(VP_VVC_TUNING)
-    if (ctx && ctx->dec) return avcodec_vvc_grow_threads(ctx->dec, count);
+    if (ctx && ctx->dec) {
+        int active = avcodec_vvc_grow_threads(ctx->dec, count);
+        if (active > 0) ctx->dec->thread_count = active;
+        return active;
+    }
 #endif
     return AVERROR(ENOSYS);
+}
+
+int vp_decoder_threads(VPContext *ctx) {
+    return ctx && ctx->dec && avcodec_is_open(ctx->dec) ? FFMAX(ctx->dec->thread_count, 1) : 0;
+}
+
+int vp_decoder_frame_contexts(VPContext *ctx) {
+    if (!ctx || !ctx->dec || !avcodec_is_open(ctx->dec)) return 0;
+    if (ctx->dec->codec_id == AV_CODEC_ID_VVC) {
+#if defined(VP_VVC_TUNING)
+        return avcodec_vvc_grow_frame_contexts(ctx->dec, 0);
+#else
+        return AVERROR(ENOSYS);
+#endif
+    }
+    return ctx->dec->active_thread_type & FF_THREAD_FRAME ? FFMAX(ctx->dec->thread_count, 1) : 1;
 }
 
 const void *vp_vvc_tuning(VPContext *ctx) {
