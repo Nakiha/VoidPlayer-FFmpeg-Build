@@ -6,8 +6,8 @@
 #include <string.h>
 static void checked_qsort(void *,size_t,size_t,int (*)(const void *,const void *));
 #ifdef __EMSCRIPTEN__
-static void cancel_test_heap_enter(void);
-#define VPA_BLOCK_SORT_TEST_HOOK cancel_test_heap_enter
+static void cancel_test_sort_enter(void);
+#define VPA_BLOCK_SORT_TEST_HOOK cancel_test_sort_enter
 #endif
 #define VPA_BLOCK_QSORT checked_qsort
 #include "voidplayer_block_sort.h"
@@ -69,11 +69,11 @@ static void shuffle_maximum(Block *blocks,uint32_t n) {
 #include <emscripten.h>
 EM_JS(void,sort_cancel_started,(void),{ globalThis.__sortCancelStarted(); });
 static int cancel_test_waiting;
-static void cancel_test_heap_enter(void) {
+static void cancel_test_sort_enter(void) {
     if(cancel_test_waiting){cancel_test_waiting=0;sort_cancel_started();}
 }
 /* Test-only export. Hard cancellation remains worker termination, not a new
- * synchronous ABI callback. Exercise the largest eligible heap repeatedly. */
+ * synchronous ABI callback. Exercise the largest proven-unique sequence repeatedly. */
 void vpa_sort_cancel_work(void) {
     const uint32_t n=VPA_BLOCK_LIMIT-6144;
     Block *blocks=malloc((size_t)VPA_BLOCK_LIMIT*sizeof(Block));assert(blocks);
@@ -101,8 +101,8 @@ int main(void) {
     for(uint32_t i=0;i<8;i++)tiny[i]=record(3,i);
     check(tiny,8,32,16,4,1);
     tiny[0]=record(4,0);tiny[1]=record(0,1);
-    check(tiny,2,2,4096,2304,1); /* no spare bytes */
-    check(tiny,2,3,4096,2304,1); /* insufficient spare bytes */
+    check(tiny,2,2,4096,2304,0); /* bounded stack scratch when no spare tail */
+    check(tiny,2,3,4096,2304,0); /* bounded stack scratch when tail is small */
     check(tiny,2,16,UINT32_MAX,2304,1);
     check(tiny,2,16,4096,UINT32_MAX,1);
     check(tiny,2,16,0,0,1);
@@ -111,7 +111,7 @@ int main(void) {
     tiny[0]=record(3,0);check(tiny,2,3,16,4,0); /* exact-small eligible tail */
     /* Bitset end cell, non-multiple-of-four geometry and exact tail boundary. */
     tiny[0]=(Block){4092,2300,4,4,51,3,7};tiny[1]=record(0,1);
-    check(tiny,2,6146,4096,2304,0);check(tiny,2,6145,4096,2304,1);
+    check(tiny,2,6146,4096,2304,0);check(tiny,2,6145,4096,2304,0);
     tiny[0]=(Block){16,4,1,1,51,3,7};check(tiny,2,3,17,5,0);
     /* Thousands of deterministic random orders/payloads, with/without ties. */
     Block *large=malloc((size_t)VPA_BLOCK_LIMIT*sizeof(Block));assert(large);
@@ -130,7 +130,7 @@ int main(void) {
             for(uint32_t i=0;i<n;i++){const Block expected=record(n-i-1,n-i-1);assert(memcmp(&large[i],&expected,sizeof(Block))==0);}
         }
         if(mode==2)shuffle_maximum(large,n);
-        check(large,n,VPA_BLOCK_LIMIT,4096,2304,mode==0?0:full||mode==3?1:0);
+        check(large,n,VPA_BLOCK_LIMIT,4096,2304,mode==3?1:0);
     }
     /* Reject count/capacity/index arithmetic overflow before touching a pointer. */
     assert(vpa_block_sort(NULL,0,0,0,0)==0);

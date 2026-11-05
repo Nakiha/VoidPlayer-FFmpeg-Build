@@ -14,6 +14,10 @@ int __wrap_avcodec_receive_frame(AVCodecContext *context,AVFrame *output) {
     output->opaque=(void *)test_frame_id;output->pts=123456;
     output->format=AV_PIX_FMT_YUV420P;test_frame_id=0;return 0;
 }
+static void test_append(const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,uint8_t w,uint8_t h,uint8_t qp,uint8_t mode,uint8_t depth) {
+    if(mode==1)ff_voidplayer_vachunk_write_intra_cu(info,x,y,w,h,depth,qp,0,0,0,0);
+    else ff_voidplayer_vachunk_write_inter_cu(info,x,y,w,h,depth,qp,mode==3,0,0,0,0,0,0,0,0,0);
+}
 static AVCodecContext fake_decoder;
 static size_t peak;
 static unsigned checks;
@@ -27,7 +31,7 @@ static VoidPlayerVachunkFrameInfo info(uintptr_t id,uint32_t width,uint32_t heig
     return value;
 }
 static void put(const VoidPlayerVachunkFrameInfo *value,uint32_t i) {
-    append(value,(i%1024)*4,(i/1024)*4,4,4,i%52,1,i%16);
+    test_append(value,(i%1024)*4,(i/1024)*4,4,4,i%52,1,i%16);
     if(allocated>peak)peak=allocated;
 }
 static int oracle_compare(const void *a,const void *b) {
@@ -37,12 +41,12 @@ int main(void) {
     assert(sizeof(Block)==12&&MAX_BLOCKS==131072&&MAX_RECORD_BYTES==33554432);
     decoder=&fake_decoder;
     VoidPlayerVachunkFrameInfo value=info(1,4096,2304);
-    append(&value,4092,2300,4,4,51,3,15);assert(!failure&&pictures[0].count==1);
-    append(&value,65535,0,4,4,51,1,0);assert(pictures[0].invalid&&pictures[0].count==1);reset();
+    test_append(&value,4092,2300,4,4,51,3,15);assert(!failure&&pictures[0].count==1);
+    test_append(&value,65535,0,4,4,51,1,0);assert(pictures[0].invalid&&pictures[0].count==1);reset();
     decoder=&fake_decoder;value=info(1,4097,2304);put(&value,0);assert(failure==AVERROR(ENOMEM)&&allocated==0);reset();
     decoder=&fake_decoder;value=info(1,4096,2305);put(&value,0);assert(failure==AVERROR(ENOMEM)&&allocated==0);reset();
     decoder=&fake_decoder;value=info(0,16,16);put(&value,0);assert(failure==AVERROR_INVALIDDATA);reset();
-    decoder=&fake_decoder;value=info(1,16,16);append(&value,0,0,0,4,1,1,0);assert(pictures[0].invalid&&!pictures[0].count);reset();
+    decoder=&fake_decoder;value=info(1,16,16);test_append(&value,0,0,0,4,1,1,0);assert(pictures[0].invalid&&!pictures[0].count);reset();
     decoder=&fake_decoder;value=info(1,16,16);put(&value,0);pictures[0].sealed=1;put(&value,1);assert(failure==AVERROR_INVALIDDATA);reset();
     decoder=&fake_decoder;value=info(1,4096,2304);
     for(uint32_t i=0;i<MAX_BLOCKS;i++)put(&value,i);
@@ -66,7 +70,7 @@ int main(void) {
         for(uint32_t i=0;i<2100;i++) {
             uint32_t key=2099-i;
             if(duplicate&&i==2099)key=2099;
-            append(&value,(key%320)*4,(key/320)*4,4,4,i%52,1+i%3,i%16);
+            test_append(&value,(key%320)*4,(key/320)*4,4,4,i%52,1+i%3,i%16);
         }
         assert(!failure);size_t before=allocated;Block *expected=malloc(2100*12);assert(expected);
         memcpy(expected,pictures[0].blocks,2100*12);qsort(expected,2100,12,oracle_compare);

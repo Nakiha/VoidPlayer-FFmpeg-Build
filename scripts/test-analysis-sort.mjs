@@ -52,7 +52,7 @@ for(const [label,collector] of [['baseline',path.join(baseline,'analysis/stream.
  report.checks.push({name:'actual-collector-'+label,optimization:'O3',simd128:true,result:collectorResults[label]});
 }
 assert.equal(collectorResults.baseline,collectorResults.candidate,'identical collector budget/retention behavior');
-// Terminate an owned worker after maximum-size heap construction. C remains
+// Terminate an owned worker after maximum-size uniqueness validation. C remains
 // synchronous. This proves neither an interrupt inside C nor a production
 // cancellation-latency bound; the startup watchdog is only a test timeout.
 const code=`import {parentPort} from 'node:worker_threads';
@@ -66,7 +66,7 @@ try{
  await new Promise((resolve,reject)=>{timer=setTimeout(()=>reject(Error('sort worker did not start')),5000);worker.on('error',reject);worker.on('message',message=>{messages.push(message);if(message.event==='sort-started')resolve();});});
  clearTimeout(timer);const exit=await worker.terminate();assert.notEqual(exit,0);
  assert.deepEqual(messages,[{event:'sort-started'}],'cancelled sort publishes no completion');
- report.checks.push({name:'maximum-sort-worker-hard-cancel',optimization:'O3',simd128:true,phase:'after-heap-construction',exit,completionPublished:false,productionLatencyGuarantee:false});
+ report.checks.push({name:'maximum-sort-worker-hard-cancel',optimization:'O3',simd128:true,phase:'after-unique-key-validation',exit,completionPublished:false,productionLatencyGuarantee:false});
 }finally{clearTimeout(timer);await worker.terminate();}
 const freshCode=`import {parentPort} from 'node:worker_threads';import create from ${JSON.stringify(pathToFileURL(sortFile).href)};const c=await create({noInitialRun:true,print:()=>{}});parentPort.postMessage({result:c._main()});`;
 const fresh=new Worker(new URL('data:text/javascript;base64,'+Buffer.from(freshCode).toString('base64')));

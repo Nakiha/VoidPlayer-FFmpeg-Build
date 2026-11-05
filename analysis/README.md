@@ -20,7 +20,7 @@ MV, palette semantics, fields, layers, and unsupported VVC tools are not exporte
 The Web input adapter explicitly rejects multi-picture AU and multilayer input.
 
 Record lifecycle: collection keyed by COPY_OPAQUE source packet metadata; successful
-single-thread `avcodec_receive_frame` seals a picture; raster order is finalized
+owner-thread `avcodec_receive_frame` seals a picture; raster order is finalized
 before publication; take frees the independent record storage. This replaces the
 old `finalize_frame_summaries` and `finish_vachunk` implementations entirely, so no
 whole-stream reordering, aggregate QP recomputation or global reset can mutate an
@@ -66,25 +66,20 @@ Performance percentages belong to fixed-machine paired experiments, not CI
 thresholds or end-to-end application guarantees.
 
 Block sorting keeps the same `(y,x)` comparator and 12-byte records. A strictly
-increasing sequence returns immediately. Otherwise an in-place typed heapsort
-is used only after proving coordinate uniqueness with a bounded 4-pixel-grid
-bitset in the existing allocation's unused tail. At 4096x2304 the bitset needs
-73728 bytes. It never grows the allocation or changes record-byte accounting.
-Insufficient spare capacity, unsupported coordinates/geometry, or duplicate keys
-fall back to the same libc `qsort` on the untouched original record sequence.
-The old `qsort` has no stable-tie contract: equal coordinates with different
-width/height/QP/mode/depth must not be silently assigned a new ordering. There is
-no new promise of stable sorting. Unique keys have a uniquely determined output;
-duplicates retain the old implementation's exact bytes rather than relying on
-the Web overlap validator to hide a changed result. Sorting and any scratch-tail
-writes finish before publication, in the existing single-threaded collector.
+increasing sequence returns immediately. Otherwise unique 4-pixel-grid keys use
+an in-place radix partition after an unchanged-input uniqueness check. Scratch
+uses allocation tail or at most 73728 bytes of the existing stack. Unsupported
+coordinates/geometry and duplicate keys fall back to libc `qsort` before moving
+any record, retaining the original tie behavior. No allocation grows and record
+byte accounting is unchanged. Sorting finishes on the owner thread before
+publication, after the decoder has completed the picture's writes.
 
 `node scripts/test-analysis-sort.mjs BUILD_ROOT BASE_SOURCE REPORT_JSON` verifies
 88398 generated record cases against actual native and Emscripten `qsort`, using
 ASan/UBSan for the native run. It includes exhaustive small tied inputs, arbitrary
 non-key fields, exact/insufficient scratch capacity, maximum counts/geometry,
 integer/index boundaries, actual collector sealing and resource failures, and
-hard worker cancellation after maximum-size heap construction. A fresh worker
+hard worker cancellation after maximum-size uniqueness validation. A fresh worker
 then reruns the record checks. Test-only notification hooks/exports are absent
 from production builds. Compiled test executables stay outside uploaded evidence;
 only test logs and small numeric reports accompany the CI production artifact.
@@ -179,3 +174,34 @@ HD and 4096×2304 geometry. Source hashes are exact; CLI score tolerance is
 runs also check stable heap and context reset. Regenerate the committed oracle
 only with `refresh-analysis-xpsnr-oracle.mjs <pinned-ffmpeg> <clean-source>`;
 ordinary tests neither build nor execute a native scorer.
+
+## Analysis throughput and concurrency
+
+Eligible VVC no-pixels pictures retain entry-point/WPP and collocated-motion
+prerequisites, then publish MV/picture completion after syntax parsing. They do
+not schedule empty reconstruction/filter stages or derive pixel reference bounds.
+The full path, late pixel requirements, source identities and drain remain intact.
+
+The collector uses a lock per picture, with cache-line separation. A worker-local
+slot cache rechecks its ID under that lock after take/close/reopen. Slot creation,
+sealing and release preserve map ownership; atomic reservations before realloc
+keep all concurrent pictures within the shared 32 MiB record ceiling.
+
+Unique aligned block coordinates use an in-place radix partition after validating
+uniqueness. Sorting reuses spare record tail or at most 72 KiB of the existing
+4 MiB stack. Duplicate/unsupported keys reach libc qsort before any record moves,
+so ties keep the original libc behavior and no second record buffer is created.
+
+The threaded artifact supports VVC internal workers and H264 frame threads.
+H264 uses the configured frame-context count, bounded by the worker budget; its
+frame/slice identities still come from COPY_OPAQUE. HEVC retains its admitted
+single-thread no-pixels path. Thread settings reserve upper bounds, not a promise
+that every codec or bitstream can keep every worker busy. Performance is measured
+locally without cloud speed gates.
+
+Threaded generated-media checks compare every returned header/block/reference
+byte and decode error code with the scalar oracle, including corrupt/truncated
+anchors and missing references. A frame-thread error can surface on a later
+feed/receive call; that observing operation is not presented as the corrupt
+source AU. Concurrent record-byte snapshots are checked against the hard budget,
+not treated as deterministic picture content. Test workers are physically joined.

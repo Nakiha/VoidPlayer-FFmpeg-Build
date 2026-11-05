@@ -12,6 +12,7 @@ on:
       - 'scripts/build-quality-library.sh'
       - 'scripts/write-capabilities.mjs'
       - 'scripts/test-analysis-*.mjs'
+      - 'scripts/analysis-test-instance.mjs'
 
 permissions:
   contents: read
@@ -69,6 +70,11 @@ jobs:
         run: node scripts/test-analysis-xpsnr.mjs "$RUNNER_TEMP/candidate"
       - name: Verify sort ties, boundaries, collector budgets and cancellation
         run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json"
+      - name: Build threaded analysis and verify concurrent record ownership
+        run: |
+          ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-mt" ANALYSIS_DIST_ROOT="$RUNNER_TEMP/candidate" \
+            bash scripts/build-analysis.sh --mt > "$RUNNER_TEMP/evidence/threaded-build.log" 2>&1
+          node scripts/test-analysis-collector-threads.mjs "$RUNNER_TEMP/analysis-mt" "$RUNNER_TEMP/evidence/collector-threads.json"
       - name: Generate test patterns and compare complete ABI and failure behavior
         env:
           BASELINE_REVISION: ${{ github.event.pull_request.base.sha }}
@@ -102,6 +108,13 @@ jobs:
           cp fixtures/analysis/vvc-main10-420-16f.mp4.packets.json "$RUNNER_TEMP/fixtures/vvc.mp4.packets.json"
           node scripts/test-analysis-execution.mjs "$RUNNER_TEMP/candidate/voidplayer-analysis.js" \
             "$RUNNER_TEMP/evidence/execution.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/hevc10.mp4" "$RUNNER_TEMP/fixtures/hevc-lossless.mp4" "$RUNNER_TEMP/fixtures/vvc.mp4"
+          for threads in 2 4; do
+            ANALYSIS_TEST_THREADS="$threads" node scripts/test-analysis-backend.mjs "$RUNNER_TEMP/baseline/voidplayer-analysis.js" \
+              "$RUNNER_TEMP/candidate/voidplayer-analysis-mt.js" "$RUNNER_TEMP/evidence/threaded-oracle-$threads.json" \
+              "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/h264-cavlc.mp4" "$RUNNER_TEMP/fixtures/h264-mbaff.mp4" "$RUNNER_TEMP/fixtures/h264-10.mp4"
+            ANALYSIS_TEST_THREADS="$threads" node scripts/test-analysis-execution.mjs "$RUNNER_TEMP/candidate/voidplayer-analysis-mt.js" \
+              "$RUNNER_TEMP/evidence/threaded-execution-$threads.json" "$RUNNER_TEMP/fixtures/h264.mp4" "$RUNNER_TEMP/fixtures/hevc.mp4" "$RUNNER_TEMP/fixtures/vvc.mp4"
+          done
           cd "$RUNNER_TEMP/candidate"
           sha256sum * > "$RUNNER_TEMP/evidence/members.sha256"
           zip -X "$RUNNER_TEMP/analysis-${{ github.event.pull_request.head.sha }}.zip" ./*

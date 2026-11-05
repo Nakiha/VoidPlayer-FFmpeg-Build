@@ -9,8 +9,8 @@ if [[ "$THREADING" == pthreads && -z "${ANALYSIS_BUILD_ROOT:-}" ]]; then BUILD="
 HEAP_MAX=536870912
 if [[ "$THREADING" == pthreads ]]; then HEAP_MAX=1073741824; fi
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
-REV=856df065ba064815eba3c6e3e77c5268e912f7ee
-if [[ "$THREADING" == pthreads ]]; then REV=a2bbd5995ec0290da13f68d7156c292f2598f26a; fi
+REV=fcc666d4605f348a94f05ec87799b56d4ebd0ba2
+if [[ "$THREADING" == pthreads ]]; then REV=fcc666d4605f348a94f05ec87799b56d4ebd0ba2; fi
 VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi

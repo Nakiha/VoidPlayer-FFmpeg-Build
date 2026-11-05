@@ -1,3 +1,4 @@
+import {createAnalysisTestInstance,closeAnalysisTestInstance} from './analysis-test-instance.mjs';
 // Generated test patterns only: no user media or playback/container ABI.
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
@@ -10,12 +11,23 @@ const [baselineFile,candidateFile,reportFile,...files]=process.argv.slice(2);
 assert.ok(baselineFile&&candidateFile&&reportFile&&files.length);
 const pinnedFfmpeg=(await readFile(new URL('build-analysis.sh',import.meta.url),'utf8')).match(/^REV=([a-f0-9]{40})$/m)[1];
 async function verifyArtifact(file,expectedRevision,expectedFfmpeg){
- const directory=path.dirname(path.resolve(file)),manifest=JSON.parse(await readFile(path.join(directory,'manifest.json'))),capabilities=JSON.parse(await readFile(path.join(directory,'capabilities.json'))),wasm=await readFile(path.join(directory,'voidplayer-analysis.wasm')),sha256=createHash('sha256').update(wasm).digest('hex');
+ const directory=path.dirname(path.resolve(file)),threaded=path.basename(file).endsWith('-mt.js');
+ const manifest=JSON.parse(await readFile(path.join(directory,'manifest.json'))),capabilities=JSON.parse(await readFile(path.join(directory,'capabilities.json')));
+ const metadata=threaded?JSON.parse(await readFile(path.join(directory,'threading.json'))):manifest;
+ const wasm=await readFile(path.join(directory,threaded?'voidplayer-analysis-mt.wasm':'voidplayer-analysis.wasm')),sha256=createHash('sha256').update(wasm).digest('hex');
  assert.equal(manifest.dirty,false,'publishable artifact must come from a clean source checkout');
- if(expectedRevision)assert.equal(manifest.revision,expectedRevision);
- assert.equal(manifest.buildId,manifest.revision+':refs-'+sha256.slice(0,16));assert.equal(capabilities.revision,manifest.revision);assert.equal(capabilities.wasmSha256,sha256);assert.equal(manifest.ffmpegRevision,expectedFfmpeg);assert.equal(manifest.threading,'single');assert.deepEqual(capabilities.registeredDemuxers,[]);assert.deepEqual(capabilities.registeredDecoders,['h264','hevc','vvc']);
- const create=(await import(pathToFileURL(path.resolve(file)).href)).default,core=await create();assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production exports only');const p=core._vp_build_id(),end=core.HEAPU8.indexOf(0,p);assert.ok(p>0&&end>p&&end-p<=128);assert.equal(new TextDecoder().decode(core.HEAPU8.subarray(p,end)),manifest.revision);core._vpa_close();
- return {revision:manifest.revision,buildId:manifest.buildId,wasmSha256:sha256,dirty:manifest.dirty,h264SkipLoopFilter:manifest.h264SkipLoopFilter??null};
+ if(expectedRevision)assert.equal(metadata.revision,expectedRevision);
+ assert.equal(metadata.revision,manifest.revision);assert.equal(metadata.ffmpegRevision,expectedFfmpeg);
+ assert.equal(metadata.buildId,metadata.revision+(threaded?':mt-':':refs-')+sha256.slice(0,16));
+ assert.equal(capabilities.revision,manifest.revision);if(!threaded)assert.equal(capabilities.wasmSha256,sha256);
+ assert.equal(manifest.threading,'single');assert.deepEqual(capabilities.registeredDemuxers,[]);assert.deepEqual(capabilities.registeredDecoders,['h264','hevc','vvc']);
+ const core=await createAnalysisTestInstance(file,{threads:1,contexts:1});
+ try{
+  assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production exports only');
+  const p=core._vp_build_id(),end=core.HEAPU8.indexOf(0,p);assert.ok(p>0&&end>p&&end-p<=128);
+  assert.equal(new TextDecoder().decode(core.HEAPU8.subarray(p,end)),metadata.revision);
+ }finally{await closeAnalysisTestInstance(core);}
+ return {revision:metadata.revision,buildId:metadata.buildId,wasmSha256:sha256,dirty:manifest.dirty,h264SkipLoopFilter:manifest.h264SkipLoopFilter??null};
 }
 async function input(file){
  const data=await readFile(file),info=JSON.parse(execFileSync('ffprobe',['-v','error','-select_streams','v:0','-show_streams','-show_packets','-show_data','-of','json',file],{maxBuffer:32*1024*1024}));
@@ -25,25 +37,30 @@ async function input(file){
  return {file:path.basename(file),sha256:createHash('sha256').update(data).digest('hex'),codec,extra,packets,field:!!stream.field_order&&!(['progressive','unknown'].includes(stream.field_order))};
 }
 async function run(moduleFile,source,{split=false,dropAnchor=false,corrupt=false,truncateAnchor=false,truncateInter=false,dropReference=false}={}){
- const create=(await import(pathToFileURL(path.resolve(moduleFile)).href)).default,core=await create();
+ const core=await createAnalysisTestInstance(moduleFile,moduleFile===baselineFile?{threads:1,contexts:1}:{});
  assert.equal(core._vpa_abi(),1);assert.equal(core._vpa_reference_abi(),1);
  assert.ok(!Object.keys(core).some(k=>/^_vpa_(?:profile|sort_cancel|block_sort)|^_av_(?:force_cpu_flags|get_cpu_flags)$/.test(k)),'production export surface');
  let opens=0,error=null;const records=[];
  const finish=()=>{const r=core._vpa_drain();if(r<0)return {phase:'drain',code:r};return steps(true);};
- function steps(eof=false){for(let n=0;n<4000;n++){const r=core._vpa_step();if(r<0)return {phase:'step',code:r};if(r===1){const count=core._vpa_count(),refs=core._vpa_ref_count();assert.ok(count>0&&count<=131072&&refs>=0&&refs<=64);const header=['ordinal','width','height','depth','invalid','picture_type','poc','count','ref_count','refs_invalid','record_bytes'].map(k=>core['_vpa_'+k]());header.push(core._vpa_pts());const bp=core._vpa_blocks(),rp=core._vpa_refs();assert.ok(Number.isSafeInteger(bp)&&bp>0&&bp+count*12<=core.HEAPU8.length);assert.ok(Number.isSafeInteger(rp)&&rp>=0&&rp+refs*8<=core.HEAPU8.length);const blocks=Buffer.from(core.HEAPU8.slice(bp,bp+count*12)),edges=Buffer.from(core.HEAPU8.slice(rp,rp+refs*8));assert.equal(blocks.length,count*12);assert.equal(edges.length,refs*8);records.push({header,blocks,edges,configuration:opens-1});assert.ok(core._vpa_take(8*1024*1024)>0);continue;}assert.equal(r,eof?2:0);return null;}throw Error('core made no bounded progress');}
+ function steps(eof=false){for(let n=0;n<4000;n++){const r=core._vpa_step();if(r<0)return {phase:'step',code:r};if(r===1){const count=core._vpa_count(),refs=core._vpa_ref_count();assert.ok(core._vpa_record_bytes()>=count*12&&core._vpa_record_bytes()<=32*1024*1024,'bounded concurrent record storage');assert.ok(count>0&&count<=131072&&refs>=0&&refs<=64);const header=['ordinal','width','height','depth','invalid','picture_type','poc','count','ref_count','refs_invalid'].map(k=>core['_vpa_'+k]());header.push(core._vpa_pts());const bp=core._vpa_blocks(),rp=core._vpa_refs();assert.ok(Number.isSafeInteger(bp)&&bp>0&&bp+count*12<=core.HEAPU8.length);assert.ok(Number.isSafeInteger(rp)&&rp>=0&&rp+refs*8<=core.HEAPU8.length);const blocks=Buffer.from(core.HEAPU8.slice(bp,bp+count*12)),edges=Buffer.from(core.HEAPU8.slice(rp,rp+refs*8));assert.equal(blocks.length,count*12);assert.equal(edges.length,refs*8);records.push({header,blocks,edges,configuration:opens-1});assert.ok(core._vpa_take(8*1024*1024)>0);continue;}assert.equal(r,eof?2:0);return null;}throw Error('core made no bounded progress');}
  function open(){const p=core._malloc(source.extra.length);core.HEAPU8.set(source.extra,p);const r=core._vpa_open(source.codec,p,source.extra.length);core._free(p);assert.equal(r,0);opens++;}
  try{open();for(const packet of source.packets){if((dropAnchor||corrupt||truncateAnchor||truncateInter||dropReference)&&packet.au>0&&packet.key)break;if(dropAnchor&&packet.au===0||dropReference&&packet.au===1)continue;if(split&&packet.au>0&&packet.key&&opens===1){error=finish();if(error)break;core._vpa_close();assert.equal(core._vpa_record_bytes(),0);open();}
   let bytes=corrupt&&packet.au===0?Buffer.alloc(packet.bytes.length):packet.bytes;if(truncateAnchor&&packet.au===0||truncateInter&&packet.au===1)bytes=bytes.subarray(0,Math.max(1,Math.floor(bytes.length/2)));const p=core._malloc(bytes.length);core.HEAPU8.set(bytes,p);const r=core._vpa_feed_known(p,bytes.length,packet.pts,packet.dts,3,packet.au);core._free(p);if(r<0){error={phase:'feed',code:r,au:packet.au};break;}assert.notEqual(r,2,'every picture is taken before feeding again');error=steps();if(error)break;
- }if(!error)error=finish();}finally{core._vpa_close();}
+ }if(!error)error=finish();}finally{await closeAnalysisTestInstance(core);}
  assert.equal(core._vpa_record_bytes(),0,'decoder records released even on failure');
  if(dropAnchor||corrupt){assert.ok(error||records.length===0||records.some(r=>r.header[4]||r.header[9]),'damaged prefix cannot yield exact output');assert.ok(records.every(r=>r.header[4]||r.header[9]),'no exact result from the damaged prefix');}
  else if(truncateAnchor||truncateInter||dropReference){assert.ok(error||records.length<source.packets.length||records.some(r=>r.header[4]||r.header[9]),'damaged first GOP cannot appear as a complete intact stream');}
- else{assert.equal(error,null);assert.equal(records.length,source.packets.length);assert.equal(new Set(records.map(r=>r.header[0])).size,records.length);for(const r of records){assert.equal(r.header[4],source.field?1:0);assert.equal(r.header[9],0);assert.equal(r.header[11],source.packets[r.header[0]].pts);for(let i=0;i<r.edges.length;i+=8){assert.ok(r.edges.readUInt32LE(i)<r.header[0]);assert.ok(r.edges.readUInt32LE(i+4)<=1);}}if(split)assert.equal(opens,2);}
+ else{assert.equal(error,null);assert.equal(records.length,source.packets.length);assert.equal(new Set(records.map(r=>r.header[0])).size,records.length);for(const r of records){assert.equal(r.header[4],source.field?1:0);assert.equal(r.header[9],0);assert.equal(r.header[10],source.packets[r.header[0]].pts);for(let i=0;i<r.edges.length;i+=8){assert.ok(r.edges.readUInt32LE(i)<r.header[0]);assert.ok(r.edges.readUInt32LE(i+4)<=1);}}if(split)assert.equal(opens,2);}
  return {opens,error,records};
 }
 const artifacts={baseline:await verifyArtifact(baselineFile,process.env.BASELINE_REVISION,process.env.BASELINE_FFMPEG_REVISION??'c160c1bb3f0faf3ac59b8fbf907a8e3fb604632e'),candidate:await verifyArtifact(candidateFile,process.env.CANDIDATE_REVISION,pinnedFfmpeg)};
 assert.equal(artifacts.candidate.h264SkipLoopFilter,true,'production H264 analysis must discard unused filtering');
 const report={artifacts,fixtureTools:execFileSync('ffmpeg',['-version'],{encoding:'utf8'}).split('\n')[0],inputs:[],checks:[]};
 for(const file of files){const source=await input(file);report.inputs.push({file:source.file,sha256:source.sha256,codec:source.codec,packets:source.packets.length});for(const [name,options] of [['whole',{}],['closed-boundary-reopen',{split:true}],['missing-anchor',{dropAnchor:true}],['corrupt-anchor',{corrupt:true}],...(source.codec===1?[['truncated-anchor',{truncateAnchor:true}],['truncated-inter',{truncateInter:true}],['missing-reference',{dropReference:true}]]:[])]){
- const a=await run(baselineFile,source,options),b=await run(candidateFile,source,options);assert.ok(isDeepStrictEqual(b,a),`${source.file} ${name}: every header/block/ref byte and failure must match (raw records stay local)`);report.checks.push({fixture:source.file,name,opens:b.opens,pictures:b.records.length,error:b.error,retainedBytes:0});console.log(`PASS ${source.file} ${name}: ${b.records.length} outputs, ${b.opens} opens, ${JSON.stringify(b.error)}`);
+ const a=await run(baselineFile,source,options),b=await run(candidateFile,source,options);// Frame threads can surface the same decode error on a later feed call.
+ // Input AU identities and every returned record remain exact; diagnostics do
+ // not pretend that the observing call identifies the corrupt source packet.
+ const comparable=value=>({...value,error:value.error?{code:value.error.code}:null});
+ const same=Number(process.env.ANALYSIS_TEST_THREADS??1)>1?isDeepStrictEqual(comparable(b),comparable(a)):isDeepStrictEqual(b,a);
+ assert.ok(same,`${source.file} ${name}: every header/block/ref byte and error class must match (raw records stay local)`);report.checks.push({fixture:source.file,name,opens:b.opens,pictures:b.records.length,error:b.error,retainedBytes:0});console.log(`PASS ${source.file} ${name}: ${b.records.length} outputs, ${b.opens} opens, ${JSON.stringify(b.error)}`);
  }}await writeFile(reportFile,JSON.stringify(report,null,2)+'\n');
