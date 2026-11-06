@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libvmaf/libvmaf.h>
+#include "picture.h" /* Pinned libvmaf reference ownership, no pixel copy. */
 
 #define QUALITY_VMAF 1
 #define QUALITY_CAMBI 2

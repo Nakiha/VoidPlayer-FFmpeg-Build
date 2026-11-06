@@ -96,7 +96,7 @@ fi
 bash "$ROOT/scripts/build-quality-library.sh"
 # This control changes the always-relinked collector, not cached FFmpeg objects.
 emcc "-O$OPT" $CFLAGS -DVP_ANALYSIS_H264_SKIP_LOOP_FILTER="$H264_SKIP_LOOP_FILTER" -include "$BUILD/vp_core_build_id.h" "$ROOT/analysis/stream.c" "$ROOT/analysis/quality.c" "$ROOT/analysis/xpsnr.c" "$ROOT/shared/vp_capabilities.c" -DVP_NO_CONTAINER_DEMUX -I "$BUILD/source" -I "$BUILD/work" \
- -I "$BUILD/quality/source/libvmaf/include" -I "$BUILD/quality/work/include" \
+ -I "$BUILD/quality/source/libvmaf/include" -I "$BUILD/quality/source/libvmaf/src" -I "$BUILD/quality/work/include" \
  libavcodec/libavcodec.a libavutil/libavutil.a "$BUILD/quality/work/src/libvmaf.a" -sDEFAULT_TO_CXX=1 \
  -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 \
  -s EXPORTED_RUNTIME_METHODS='["HEAPU8"]' -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY="$HEAP_MAX" -s FILESYSTEM=0 \
