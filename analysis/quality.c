@@ -26,6 +26,8 @@ static struct {
     unsigned metrics, width, height, depth, frames, max_frames;
     unsigned input_bytes;
     int flushed, failed, error, heat_frame;
+    int pending;
+    VmafPicture inputs[2];
     Heatmap heatmaps[QUALITY_SCALES];
 } quality;
 
@@ -38,6 +40,7 @@ static int fail(int code) {
 }
 
 int vpa_quality_close(void) {
+    for (unsigned i = 0; i < 2; i++) if (quality.inputs[i].ref) vmaf_picture_unref(&quality.inputs[i]);
     int err = quality.context ? vmaf_close(quality.context) : 0;
     if (quality.model) vmaf_model_destroy(quality.model);
     for (unsigned i = 0; i < QUALITY_SCALES; i++) free(quality.heatmaps[i].data);
@@ -136,23 +139,14 @@ static int copy_picture(VmafPicture *picture, const uint8_t *bytes) {
 /* Packed source Y/U/V, native bit depth, no conversion. The library takes the
  * allocated pictures, never the caller buffers. A failed feed poisons this
  * context: the caller must close it instead of retrying an uncertain index. */
-int vpa_quality_feed(const uint8_t *reference, const uint8_t *distorted,
-                     unsigned bytes, unsigned index) {
-    if (!quality.context || quality.flushed || quality.failed) return fail(-EINVAL);
-    if (!reference || !distorted || bytes != quality.input_bytes ||
-        index != quality.frames || index >= quality.max_frames) return fail(-EINVAL);
+static int submit_pictures(VmafPicture *ref, VmafPicture *dist, unsigned index) {
     quality.heat_frame = -1;
-    VmafPicture ref = {0}, dist = {0};
-    int err = copy_picture(&ref, reference);
-    if (err) return fail(err);
-    err = copy_picture(&dist, distorted);
-    if (err) { vmaf_picture_unref(&ref); return fail(err); }
-    err = vmaf_read_pictures(quality.context, &ref, &dist, index);
+    int err = vmaf_read_pictures(quality.context, ref, dist, index);
     if (err) {
         /* Early extractor failures leave caller references owned by us; success
          * clears both pictures. Temporal references are released by close. */
-        if (ref.ref) vmaf_picture_unref(&ref);
-        if (dist.ref) vmaf_picture_unref(&dist);
+        if (ref->ref) vmaf_picture_unref(ref);
+        if (dist->ref) vmaf_picture_unref(dist);
         quality.failed = 1;
         return fail(err);
     }
@@ -160,8 +154,48 @@ int vpa_quality_feed(const uint8_t *reference, const uint8_t *distorted,
     quality.frames++;
     return fail(0);
 }
+/* Direct input ABI 1. JS writes the final library pictures in place. Only
+ * plane accessors may intervene before commit/close. Commit transfers both
+ * references to libvmaf; borrowed plane pointers immediately expire. */
+int vpa_quality_input_abi(void) { return 1; }
+int vpa_quality_prepare(unsigned index, unsigned same) {
+    if (!quality.context || quality.flushed || quality.failed || quality.pending || same > 1 ||
+        index != quality.frames || index >= quality.max_frames) return fail(-EINVAL);
+    int err = vmaf_picture_alloc(&quality.inputs[0], VMAF_PIX_FMT_YUV420P, quality.depth, quality.width, quality.height);
+    if (!err) err = same ? vmaf_picture_ref(&quality.inputs[1], &quality.inputs[0]) :
+        vmaf_picture_alloc(&quality.inputs[1], VMAF_PIX_FMT_YUV420P, quality.depth, quality.width, quality.height);
+    if (err) {
+        for (unsigned i = 0; i < 2; i++) if (quality.inputs[i].ref) vmaf_picture_unref(&quality.inputs[i]);
+        return fail(err);
+    }
+    quality.pending = 1;
+    return fail(0);
+}
+uint8_t *vpa_quality_input_data(unsigned role, unsigned plane) {
+    return quality.pending && role < 2 && plane < 3 ? quality.inputs[role].data[plane] : NULL;
+}
+int vpa_quality_input_stride(unsigned role, unsigned plane) {
+    return quality.pending && role < 2 && plane < 3 ? quality.inputs[role].stride[plane] : 0;
+}
+int vpa_quality_commit(unsigned index) {
+    if (!quality.pending || quality.failed || quality.flushed || index != quality.frames) return fail(-EINVAL);
+    quality.pending = 0;
+    return submit_pictures(&quality.inputs[0], &quality.inputs[1], index);
+}
+int vpa_quality_feed(const uint8_t *reference, const uint8_t *distorted,
+                     unsigned bytes, unsigned index) {
+    if (!quality.context || quality.flushed || quality.failed || quality.pending) return fail(-EINVAL);
+    if (!reference || !distorted || bytes != quality.input_bytes ||
+        index != quality.frames || index >= quality.max_frames) return fail(-EINVAL);
+    VmafPicture ref = {0}, dist = {0};
+    int err = copy_picture(&ref, reference);
+    if (err) return fail(err);
+    err = copy_picture(&dist, distorted);
+    if (err) { vmaf_picture_unref(&ref); return fail(err); }
+    return submit_pictures(&ref, &dist, index);
+}
 int vpa_quality_flush(void) {
-    if (!quality.context || quality.failed || !quality.frames) return fail(-EINVAL);
+    if (!quality.context || quality.failed || quality.pending || !quality.frames) return fail(-EINVAL);
     if (quality.flushed) return 0;
     int err = vmaf_read_pictures(quality.context, NULL, NULL, 0);
     if (err) { quality.failed = 1; return fail(err); }

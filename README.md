@@ -86,6 +86,27 @@ comparison, not counted as validation of this build.
 
 ## WASM decoder core (web prototype)
 
+Pixel transfer uses additive borrowed-plane ABI 1 (`vp_frame_plane_abi`,
+`vp_frame_plane_data`, `vp_frame_plane_stride`). Frame ABI 2 still describes the
+tight destination, while these accessors expose the original AVFrame's separate
+planes and signed strides. They expire on the next receive/extract/reset/destroy.
+The host copies each plane directly to its owned transfer buffer; merely receiving
+a picture or reading its identity does not allocate or pack a pixel buffer.
+`vp_pixels` remains a lazy contiguous compatibility export, including explicit
+swscale RGBA conversion for unsupported layouts/colorimetry.
+
+Analysis direct-input ABI 1 (`vpa_quality_input_abi`, `vpa_quality_prepare`,
+`vpa_quality_input_data/stride`, `vpa_quality_commit`) lets the host write into
+the final libvmaf pictures. Identical inputs use two picture references to one
+allocation. Prepare admits exactly one pending input; only accessors may intervene
+before commit or close. Commit transfers ownership and invalidates the pointers.
+XPSNR's matching `vpa_xpsnr_*` direct input uses its final uint16 sample planes:
+8-bit uploads widen directly, 10-bit uploads retain LE bytes. Sample validation,
+reference-first history, frame order and final flush are unchanged. Legacy packed
+feed exports remain available; neither direct path needs packed staging storage.
+Existing packet-crop, quality and XPSNR regressions cover these additive APIs,
+pointer invalidation, shared ownership and official numerical expectations.
+
 `scripts/build-wasm.sh` builds a trimmed single-threaded Emscripten core for
 the browser prototype's fallback decode path — containers and codecs the
 browser cannot handle through mediabunny/WebCodecs (FFV1, MPEG-1/2, MPEG-4 ASP,

@@ -129,6 +129,7 @@ typedef struct VPContext {
 
     uint8_t *pixels;
     size_t pixels_size;
+    int pixels_ready;
     VPFrameInfo output;
     int64_t last_ticks;      // pts of the frame currently in pixels
     int have_frame;          // pixels holds last_ticks
@@ -1140,7 +1141,8 @@ static int vp_convert_rgba(VPContext *ctx) {
     return 0;
 }
 
-// ABI v2 owns tightly packed planes until the next output/reset/destroy.
+// ABI v2 describes a tight export. Plane ABI 1 borrows the original AVFrame;
+// the legacy contiguous export is materialized only when vp_pixels is called.
 // Layout 1 is planar YUV, 2 is semiplanar UV, 0 is explicit swscale RGBA.
 static int vp_convert(VPContext *ctx) {
     AVFrame *frame = ctx->frame;
@@ -1187,17 +1189,8 @@ static int vp_convert(VPContext *ctx) {
             total += stride * h;
             if (total > INT_MAX) return VP_ERR;
         }
-        if (ctx->pixels_size < (size_t)total) {
-            uint8_t *data = realloc(ctx->pixels, total);
-            if (!data) return VP_ERR;
-            ctx->pixels = data; ctx->pixels_size = total;
-        }
-        for (int p = 0; p < (semi ? 2 : 3); p++)
-            for (int y = 0; y < planes.planes[p].height; y++)
-                memcpy(ctx->pixels + planes.planes[p].offset + (size_t)y * planes.planes[p].stride,
-                       frame->data[p] + (ptrdiff_t)y * frame->linesize[p], planes.planes[p].stride);
         planes.bytes = total;
-    } else if (vp_convert_rgba(ctx) < 0) return VP_ERR;
+    }
     VPFrameInfo next = planes;
     next.pts = frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
     next.duration = frame->duration;
@@ -1215,6 +1208,7 @@ static int vp_convert(VPContext *ctx) {
     next.revision = ctx->output.revision;
     if (!next.revision || memcmp(&next.width, &ctx->output.width, sizeof(VPFrameInfo) - offsetof(VPFrameInfo, width))) next.revision++;
     ctx->output = next;
+    ctx->pixels_ready = 0;
     return 0;
 }
 
@@ -1300,7 +1294,32 @@ int vp_prime_first_presentable(VPContext *ctx) {
 
 int vp_frame_interlaced(VPContext *ctx) { return ctx && ctx->have_frame ? !!(ctx->frame->flags&AV_FRAME_FLAG_INTERLACED) : -1; }
 int64_t vp_last_ticks(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->last_ticks : -1; }
-uint8_t *vp_pixels(VPContext *ctx) { return ctx && ctx->have_frame ? ctx->pixels : NULL; }
+int vp_frame_plane_abi(void) { return 1; }
+uint8_t *vp_frame_plane_data(VPContext *ctx, unsigned plane) {
+    if (!ctx || !ctx->have_frame || !ctx->output.layout || plane >= (ctx->output.layout == 2 ? 2u : 3u)) return NULL;
+    return ctx->frame->data[plane];
+}
+int vp_frame_plane_stride(VPContext *ctx, unsigned plane) {
+    return vp_frame_plane_data(ctx, plane) ? ctx->frame->linesize[plane] : 0;
+}
+uint8_t *vp_pixels(VPContext *ctx) {
+    if (!ctx || !ctx->have_frame) return NULL;
+    if (!ctx->pixels_ready) {
+        if (ctx->output.layout) {
+            if (ctx->pixels_size < (size_t)ctx->output.bytes) {
+                uint8_t *data = realloc(ctx->pixels, ctx->output.bytes);
+                if (!data) return NULL;
+                ctx->pixels = data; ctx->pixels_size = ctx->output.bytes;
+            }
+            for (unsigned p = 0; p < (ctx->output.layout == 2 ? 2u : 3u); p++)
+                for (int y = 0; y < ctx->output.planes[p].height; y++)
+                    memcpy(ctx->pixels + ctx->output.planes[p].offset + (size_t)y * ctx->output.planes[p].stride,
+                           ctx->frame->data[p] + (ptrdiff_t)y * ctx->frame->linesize[p], ctx->output.planes[p].stride);
+        } else if (vp_convert_rgba(ctx) < 0) return NULL;
+        ctx->pixels_ready = 1;
+    }
+    return ctx->pixels;
+}
 const VPFrameInfo *vp_frame_info(VPContext *ctx) { return ctx && ctx->have_frame ? &ctx->output : NULL; }
 const char *vp_frame_format(VPContext *ctx) {
     const char *name = ctx && ctx->have_frame ? av_get_pix_fmt_name(ctx->output.source_format) : NULL;

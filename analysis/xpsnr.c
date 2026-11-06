@@ -49,7 +49,7 @@ typedef struct {
     uint64_t (*diff2nd_func)(uint32_t,uint32_t,const int16_t *,int16_t *,int16_t *,int);
 } XPSNRDSPContext;
 typedef struct {
-    int bpp, depth, num_comps, line_sizes[3], plane_height[3], plane_width[3];
+    int bpp, depth, num_comps, line_sizes[3], plane_height[3], plane_width[3], pending;
     unsigned frame_rate;
     uint64_t num_frames_64, max_error_64;
     double *sse_luma, *weights, sum_wdist[3], sum_xpsnr[3], current[3];
@@ -389,9 +389,41 @@ int vpa_xpsnr_open(unsigned width,unsigned height,unsigned depth,
 oom:
     vpa_xpsnr_close(); return -ENOMEM;
 }
+/* Direct input ABI 1 uses the algorithm's uint16 sample buffers. Eight-bit
+ * uploads widen once at the JS boundary; ten-bit uploads copy LE bytes as-is. */
+int vpa_xpsnr_input_abi(void) { return 1; }
+int vpa_xpsnr_prepare(unsigned index) {
+    XPSNRContext *s=&xpsnr;
+    if(!s->opened || s->flushed || s->failed || s->pending || index!=s->num_frames_64 || index>=s->max_frames) return -EINVAL;
+    s->pending=1;
+    return 0;
+}
+uint8_t *vpa_xpsnr_input_data(unsigned role,unsigned plane) {
+    return xpsnr.pending && role<2 && plane<3 ? (uint8_t *)(role ? xpsnr.buf_rec[plane] : xpsnr.buf_org[plane]) : NULL;
+}
+int vpa_xpsnr_commit(unsigned index) {
+    XPSNRContext *s=&xpsnr;
+    if(!s->pending || s->failed || s->flushed || index!=s->num_frames_64) return -EINVAL;
+    s->pending=0;
+    for(unsigned c=0;c<3;c++) for(unsigned n=0;n<(unsigned)(s->plane_width[c]*s->plane_height[c]);n++) {
+        if((uint16_t)s->buf_org[c][n]>=(1u<<s->depth) || (uint16_t)s->buf_rec[c][n]>=(1u<<s->depth)) {
+            s->failed=1; return -EINVAL;
+        }
+    }
+    uint64_t wsse[3]={0};
+    const int err=get_wsse(s,s->buf_org,s->buf_org_m1,s->buf_org_m2,s->buf_rec,wsse);
+    if(err) {s->failed=1;return err;}
+    for(unsigned c=0;c<3;c++) {
+        const double root=sqrt((double)wsse[c]);
+        s->current[c]=get_avg_xpsnr(root,INFINITY,s->plane_width[c],s->plane_height[c],s->max_error_64,1);
+        s->sum_wdist[c]+=root; s->sum_xpsnr[c]+=s->current[c];
+    }
+    s->num_frames_64++;
+    return 0;
+}
 int vpa_xpsnr_feed(const uint8_t *reference,const uint8_t *distorted,unsigned bytes,unsigned index) {
     XPSNRContext *s=&xpsnr;
-    if(!s->opened || s->flushed || s->failed || !reference || !distorted ||
+    if(!s->opened || s->flushed || s->failed || s->pending || !reference || !distorted ||
        bytes!=s->input_bytes || index!=s->num_frames_64 || index>=s->max_frames) return -EINVAL;
     unsigned offset=0;
     for(unsigned c=0;c<3;c++) {
@@ -405,19 +437,11 @@ int vpa_xpsnr_feed(const uint8_t *reference,const uint8_t *distorted,unsigned by
         }
         offset+=samples*s->bpp;
     }
-    uint64_t wsse[3]={0};
-    const int err=get_wsse(s,s->buf_org,s->buf_org_m1,s->buf_org_m2,s->buf_rec,wsse);
-    if(err) {s->failed=1;return err;}
-    for(unsigned c=0;c<3;c++) {
-        const double root=sqrt((double)wsse[c]);
-        s->current[c]=get_avg_xpsnr(root,INFINITY,s->plane_width[c],s->plane_height[c],s->max_error_64,1);
-        s->sum_wdist[c]+=root; s->sum_xpsnr[c]+=s->current[c];
-    }
-    s->num_frames_64++;
-    return 0;
+    s->pending=1;
+    return vpa_xpsnr_commit(index);
 }
 int vpa_xpsnr_flush(void) {
-    if(!xpsnr.opened || xpsnr.failed || xpsnr.flushed || xpsnr.num_frames_64!=xpsnr.max_frames) return -EINVAL;
+    if(!xpsnr.opened || xpsnr.failed || xpsnr.flushed || xpsnr.pending || xpsnr.num_frames_64!=xpsnr.max_frames) return -EINVAL;
     xpsnr.flushed=1; return 0;
 }
 double vpa_xpsnr_score(unsigned plane) {
