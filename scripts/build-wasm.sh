@@ -8,8 +8,8 @@ set -euo pipefail
 # WebCodecs lacks (FFV1, MPEG-1/2, MPEG-4 ASP, MJPEG, ProRes, H.266/VVC).
 # ---------------------------------------------------------------------------
 
-FFMPEG_REF="n9.0.2"
-FFMPEG_REMOTE="https://github.com/FFmpeg/FFmpeg.git"
+FFMPEG_REF="wasm-n9.0.2-unified"
+FFMPEG_REMOTE="https://github.com/Nakiha/FFmpeg.git"
 BUILD_ROOT=""
 DIST_ROOT=""
 CLEAN=false
@@ -27,8 +27,8 @@ while [[ $# -gt 0 ]]; do
         --skip-package)  SKIP_PACKAGE=true; shift ;;
         -h|--help)
             echo "Usage: $0 [options]"
-            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: n9.0.2)"
-            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: FFmpeg/FFmpeg upstream)"
+            echo "  --ffmpeg-ref REF     FFmpeg tag/branch (default: wasm-n9.0.2-unified)"
+            echo "  --ffmpeg-remote URL  FFmpeg source remote (default: Nakiha/FFmpeg)"
             echo "  --build-root PATH    Build directory    (default: .build)"
             echo "  --dist-root PATH     Output directory   (default: dist)"
             echo "  --clean              Wipe build directory before starting"
@@ -87,13 +87,22 @@ fi
 
 mkdir -p "$BUILD_ROOT/sources" "$FFMPEG_BUILD" "$DIST_ROOT"
 
-if [ ! -d "$FFMPEG_SOURCE" ]; then
+SOURCE_REF="$FFMPEG_REF"
+if [[ "$FFMPEG_REF" == wasm-n9.0.2-unified ]]; then
+    SOURCE_REF="$(cat "$REPO_ROOT/scripts/ffmpeg-wasm-revision")"
+fi
+if [[ ! -d "$FFMPEG_SOURCE" && "$SOURCE_REF" != "$FFMPEG_REF" ]]; then
+    step git init -q "$FFMPEG_SOURCE"
+    step git -C "$FFMPEG_SOURCE" remote add origin "$FFMPEG_REMOTE"
+    step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$SOURCE_REF"
+    step git -C "$FFMPEG_SOURCE" checkout --detach FETCH_HEAD
+elif [ ! -d "$FFMPEG_SOURCE" ]; then
     step git clone --depth 1 --branch "$FFMPEG_REF" "$FFMPEG_REMOTE" "$FFMPEG_SOURCE"
 fi
 
 # Never label a cached source checkout as a different requested revision.
-if ! EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse --verify "$FFMPEG_REF^{commit}" 2>/dev/null)"; then
-    step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$FFMPEG_REF"
+if ! EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse --verify "$SOURCE_REF^{commit}" 2>/dev/null)"; then
+    step git -C "$FFMPEG_SOURCE" fetch --depth=1 origin "$SOURCE_REF"
     EXPECTED_REV="$(git -C "$FFMPEG_SOURCE" rev-parse "FETCH_HEAD^{commit}")"
 fi
 [ "$(git -C "$FFMPEG_SOURCE" rev-parse HEAD)" = "$EXPECTED_REV" ] || die "Cached FFmpeg source differs from $FFMPEG_REF; use a fresh --build-root"
@@ -135,9 +144,10 @@ verify_wasm_backend() {
     # --disable-asm silently reduces even --arch=wasm32 to ARCH_WASM=0.
     # Reject invalid caches before dependencies; check new configurations
     # before compiling FFmpeg (whose configure needs installed dav1d).
-    for feature in ARCH_WASM HAVE_SIMD128; do
+    for feature in ARCH_WASM HAVE_SIMD128 CONFIG_VOIDPLAYER_ANALYSIS; do
         expected=1
         if [ "$feature" = HAVE_SIMD128 ]; then expected="$WASM_SIMD"; fi
+        if [ "$feature" = CONFIG_VOIDPLAYER_ANALYSIS ]; then expected=0; fi
         grep -Eq "^#define $feature $expected$" "$config" || \
             die "Playback backend requires $feature=$expected; use a fresh --build-root"
     done
@@ -165,6 +175,7 @@ DECODERS="$DECODERS libdav1d"
 
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"
+    "--disable-voidplayer-analysis"
     "--cc=emcc"
     "--cxx=em++"
     "--ar=emar"

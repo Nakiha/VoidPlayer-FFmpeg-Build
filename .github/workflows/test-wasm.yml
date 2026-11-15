@@ -44,13 +44,13 @@ jobs:
       - name: Build WASM core variants
         run: |
           chmod +x scripts/build-wasm.sh
-          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.2 --clean --skip-package
-          bash scripts/build-wasm.sh --ffmpeg-ref n9.0.2 --mt --skip-package
+          bash scripts/build-wasm.sh --ffmpeg-ref wasm-n9.0.2-unified --clean --skip-package
+          bash scripts/build-wasm.sh --ffmpeg-ref wasm-n9.0.2-unified --mt --skip-package
 
       - name: Verify packet output identity across real reordering and drain
         run: |
-          node scripts/test-packet-identity.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
-          node scripts/test-packet-identity.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
+          node scripts/test-packet-identity.mjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified/voidplayer-core.js
+          node scripts/test-packet-identity.mjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified/voidplayer-core-mt.js
           bash scripts/link-packet-identity-test.sh .build
 
       - name: Reject stale playback backend caches before compiling dependencies
@@ -60,13 +60,13 @@ jobs:
 
       - name: Verify high-depth PQ and HLG planes against independent FFmpeg
         run: |
-          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
-          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
+          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified/voidplayer-core.js
+          node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified/voidplayer-core-mt.js
 
       - name: Verify packet coded crop and SAR in YUV and RGBA outputs
         run: |
-          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js
-          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js
+          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified/voidplayer-core.js
+          node scripts/test-packet-crop.mjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified/voidplayer-core-mt.js
 
       - name: Create MPEG-PS regression sample
         run: |
@@ -77,29 +77,29 @@ jobs:
 
       - name: Test import, seek anchors, and random-seek pixels
         run: |
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-n9.0.2" .build/seek-regression.mpg
-          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-n9.0.2" --stem voidplayer-core-mt .build/seek-regression.mpg
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified" .build/seek-regression.mpg
+          node scripts/test-wasm-node.cjs "dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified" --stem voidplayer-core-mt .build/seek-regression.mpg
 
       - name: Check MPEG-PS video probing after decoder trimming
         run: |
           ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x96:rate=25" \
             -t 2 -an -c:v mpeg2video -g 12 -f mpeg .build/probe-regression.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 .build/probe-regression.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt .build/probe-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified .build/probe-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified --stem voidplayer-core-mt .build/probe-regression.mpg
           python3 - <<'PY'
           from pathlib import Path
           source = Path('.build/probe-regression.mpg').read_bytes()
           Path('.build/probe-tail.mpg').write_bytes(source + bytes([0xa5]) * (190 * 1024))
           PY
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 .build/probe-tail.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt .build/probe-tail.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified .build/probe-tail.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified --stem voidplayer-core-mt .build/probe-tail.mpg
 
       - name: Check MPEG-PS index retains untimed packets without seeking them
         run: |
           ffmpeg -hide_banner -loglevel error -f lavfi -i "testsrc2=size=160x96:rate=25" \
             -t 2 -an -c:v mpeg2video -g 12 -packetsize 4096 -f mpeg .build/probe-untimed.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 --require-untimed .build/probe-untimed.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt --require-untimed .build/probe-untimed.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified --require-untimed .build/probe-untimed.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified --stem voidplayer-core-mt --require-untimed .build/probe-untimed.mpg
 
       - name: Create long B-frame PS sample
         run: |
@@ -109,13 +109,13 @@ jobs:
 
       - name: Test long residual PS index import and random-seek pixels
         run: |
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 .build/indexed-seek-regression.mpg
-          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-n9.0.2 --stem voidplayer-core-mt .build/indexed-seek-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified .build/indexed-seek-regression.mpg
+          node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified --stem voidplayer-core-mt .build/indexed-seek-regression.mpg
 
       - name: Verify removed containers cannot open and all residual demuxers retain indexing
         run: |
-          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js"
-          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-n9.0.2/voidplayer-core-mt.js"
+          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified/voidplayer-core.js"
+          node scripts/test-demux-removal.mjs "$PWD/dist/voidplayer-ffmpeg-wasm-mt-wasm-n9.0.2-unified/voidplayer-core-mt.js"
 
       - uses: actions/upload-artifact@v4
         with:

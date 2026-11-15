@@ -7,7 +7,7 @@ const root=path.resolve(import.meta.dirname,'..'),build=path.resolve(process.arg
 const out=path.join(path.dirname(reportFile),'collector-thread-build');await mkdir(out,{recursive:true});
 const moduleFile=path.join(out,'collector.mjs');
 execFileSync('emcc',[path.join(root,'analysis/test-collector-threads.c'),'-O3','-pthread','-msimd128',
- '-DVP_ANALYSIS_ONLY=1','-DVP_HEVC_NO_PIXELS=1','-DVP_VVC_NO_PIXELS=1',
+ '-DVP_HEVC_NO_PIXELS=1','-DVP_VVC_NO_PIXELS=1',
  '-I'+path.join(build,'source'),'-I'+path.join(build,'work'),
  path.join(build,'work/libavcodec/libavcodec.a'),path.join(build,'work/libavutil/libavutil.a'),
  '-sMODULARIZE=1','-sEXPORT_ES6=1','-sENVIRONMENT=node','-sALLOW_MEMORY_GROWTH=1','-sPTHREAD_POOL_SIZE=4',

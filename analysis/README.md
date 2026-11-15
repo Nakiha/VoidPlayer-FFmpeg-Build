@@ -1,7 +1,7 @@
 # Independent bitstream analysis core (ABI 1)
 
 `bash scripts/build-analysis.sh` builds single-threaded `voidplayer-analysis.js`
-and `.wasm` from the instrumented FFmpeg revision pinned in that script (`REV=`).
+and `.wasm` from the shared FFmpeg revision in `scripts/ffmpeg-wasm-revision` with `--enable-voidplayer-analysis`.
 The playback build and its collection settings do not change. License: LGPL-2.1-or-later.
 Build patches and collector live here; the Web repository only consumes the result.
 
@@ -99,7 +99,7 @@ limits, Main10 QP semantics and the semantic analysis recipe are unchanged.
 Older clients stay full; clients without the extension stay full. Artifacts
 expose executionAbi=1 and hevcNoPixels, with exact source/WASM build identity.
 
-Only independent analysis compiles VP_ANALYSIS_ONLY=1. Source admission and
+Only independent analysis enables CONFIG_VOIDPLAYER_ANALYSIS. Source admission and
 late retry boundaries are documented in the pinned FFmpeg
 `doc/voidplayer-analysis.md`. The client must discard unpublished attempt results
 and rebuild a fresh full decoder from the proven index anchor, at most once per

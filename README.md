@@ -111,7 +111,7 @@ pointer invalidation, shared ownership and official numerical expectations.
 the browser prototype's fallback decode path — containers and codecs the
 browser cannot handle through mediabunny/WebCodecs (FFV1, MPEG-1/2, MPEG-4 ASP,
 MJPEG, ProRes, and H.266/VVC, which requires FFmpeg ≥ 7.1; this build uses
-`n9.0.2` from `FFmpeg/FFmpeg`). H.264, HEVC, VP8 and VP9 are also
+the shared n9.0.2-based revision from `Nakiha/FFmpeg`). H.264, HEVC, VP8 and VP9 are also
 included: browsers support those codecs only in specific profiles, so gaps like
 H.264 High 4:2:2 or HEVC 4:2:2/10-bit need the fallback too.
 
@@ -126,7 +126,7 @@ Prerequisites: an Emscripten SDK with `emcc` on `PATH`, or a checkout under
 `.toolchains/emsdk` (`./emsdk install latest && ./emsdk activate latest`).
 
 ```bash
-bash scripts/build-wasm.sh                # n9.0.2 from upstream FFmpeg
+bash scripts/build-wasm.sh                # pinned unified Nakiha/FFmpeg revision
 bash scripts/build-wasm.sh --mt           # multi-threaded variant (pthreads)
 bash scripts/build-wasm.sh --ffmpeg-ref n8.1
 node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 [sample ...]
@@ -340,9 +340,9 @@ HDR resources tagged BT.2020 NCL with PQ/HLG and at least 10-bit depth retain or
 
 ### WASM refresh and optimization experiments
 
-Playback/index uses upstream FFmpeg n9.0.2; analysis uses a separate pinned
-n9.0.2 fork with bounded H.264/HEVC/VVC hooks. Analysis remains single threaded
-because completed-picture sealing relies on decoder callback order. The hooks,
+Playback and analysis use the same Nakiha/FFmpeg commit in
+`scripts/ffmpeg-wasm-revision`. Only analysis configures
+`--enable-voidplayer-analysis`. Both products have independent ST and MT artifacts. The hooks,
 reference union, coded geometry and stable VVC picture identity are in the fork
 commit rather than text substitutions against an older FFmpeg release.
 

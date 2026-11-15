@@ -9,7 +9,7 @@ import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 const [baselineFile,candidateFile,reportFile,...files]=process.argv.slice(2);
 assert.ok(baselineFile&&candidateFile&&reportFile&&files.length);
-const pinnedFfmpeg=(await readFile(new URL('build-analysis.sh',import.meta.url),'utf8')).match(/^REV=([a-f0-9]{40})$/m)[1];
+const pinnedFfmpeg=(await readFile(new URL('ffmpeg-wasm-revision',import.meta.url),'utf8')).trim();
 async function verifyArtifact(file,expectedRevision,expectedFfmpeg){
  const directory=path.dirname(path.resolve(file)),threaded=path.basename(file).endsWith('-mt.js');
  const manifest=JSON.parse(await readFile(path.join(directory,'manifest.json'))),capabilities=JSON.parse(await readFile(path.join(directory,'capabilities.json')));

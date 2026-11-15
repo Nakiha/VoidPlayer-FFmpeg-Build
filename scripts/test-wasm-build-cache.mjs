@@ -45,7 +45,7 @@ try {
   rejects(/Build inputs changed/);
   writeFileSync(signature, originalSignature);
   rejects(/Build inputs changed/, {WASM_SIMD: simd === '1' ? '0' : '1'});
-  for (const [macro, expected] of [['ARCH_WASM', '1'], ['HAVE_SIMD128', simd]]) {
+  for (const [macro, expected] of [['ARCH_WASM', '1'], ['HAVE_SIMD128', simd], ['CONFIG_VOIDPLAYER_ANALYSIS', '0']]) {
     const line = `#define ${macro} ${expected}`;
     assert.ok(originalConfig.split('\n').includes(line));
     writeFileSync(config, originalConfig.replace(line, `#define ${macro} ${expected === '1' ? '0' : '1'}`));

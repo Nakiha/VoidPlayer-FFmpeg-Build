@@ -9,8 +9,7 @@ if [[ "$THREADING" == pthreads && -z "${ANALYSIS_BUILD_ROOT:-}" ]]; then BUILD="
 HEAP_MAX=536870912
 if [[ "$THREADING" == pthreads ]]; then HEAP_MAX=1073741824; fi
 OUT="${ANALYSIS_DIST_ROOT:-$ROOT/dist/voidplayer-analysis}"
-REV=fcc666d4605f348a94f05ec87799b56d4ebd0ba2
-if [[ "$THREADING" == pthreads ]]; then REV=fcc666d4605f348a94f05ec87799b56d4ebd0ba2; fi
+REV="$(cat "$ROOT/scripts/ffmpeg-wasm-revision")"
 VP_REQUESTED_EM_CACHE="${EM_CACHE:-}"
 if ! command -v emcc >/dev/null; then source "${EMSDK:-$ROOT/.toolchains/emsdk}/emsdk_env.sh" >/dev/null; fi
 if [ -n "$VP_REQUESTED_EM_CACHE" ]; then export EM_CACHE="$VP_REQUESTED_EM_CACHE"; fi
@@ -42,7 +41,7 @@ H264_SKIP_LOOP_FILTER="${ANALYSIS_H264_SKIP_LOOP_FILTER:-1}"
 [[ "$H264_SKIP_LOOP_FILTER" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_H264_SKIP_LOOP_FILTER'; exit 1; }
 VVC_NO_PIXELS="${ANALYSIS_VVC_NO_PIXELS:-1}"
 [[ "$VVC_NO_PIXELS" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_VVC_NO_PIXELS'; exit 1; }
-CFLAGS="-msimd128 -DVP_ANALYSIS_ONLY=1 -DVP_HEVC_NO_PIXELS=$HEVC_NO_PIXELS -DVP_VVC_NO_PIXELS=$VVC_NO_PIXELS"
+CFLAGS="-msimd128 -DVP_HEVC_NO_PIXELS=$HEVC_NO_PIXELS -DVP_VVC_NO_PIXELS=$VVC_NO_PIXELS"
 PTHREAD_CONFIG=--disable-pthreads
 if [[ "$THREADING" == pthreads ]]; then
   CFLAGS="-pthread $CFLAGS"
@@ -59,13 +58,13 @@ emconfigure "$BUILD/source/configure" --cc=emcc --cxx=em++ --ar=emar --ranlib=em
  --target-os=none --arch=wasm32 --cpu=generic --enable-cross-compile --disable-stripping \
  --disable-programs --disable-doc --disable-debug --disable-avdevice --disable-avfilter --disable-swresample \
  --disable-swscale --disable-avformat --disable-network --disable-everything --disable-autodetect \
- "$PTHREAD_CONFIG" --disable-w32threads --disable-os2threads --enable-avcodec --enable-avutil \
+ "$PTHREAD_CONFIG" --disable-w32threads --disable-os2threads --enable-voidplayer-analysis --enable-avcodec --enable-avutil \
  --enable-decoder=h264,hevc,vvc --enable-parser=h264,hevc,vvc --optflags="-O$OPT" --extra-cflags="$CFLAGS"
 printf '%s\n' "$SIGNATURE" > .analysis-build-signature
 fi
 # FFmpeg's --disable-asm also disables the WASM C-intrinsics backend.
 # Check the effective config, including when an existing work directory is used.
-for VP_ANALYSIS_FEATURE in ARCH_WASM HAVE_SIMD128; do
+for VP_ANALYSIS_FEATURE in ARCH_WASM HAVE_SIMD128 CONFIG_VOIDPLAYER_ANALYSIS; do
   if ! grep -Eq "^#define ${VP_ANALYSIS_FEATURE} 1$" config.h; then
     echo "Analysis backend missing ${VP_ANALYSIS_FEATURE}; select a fresh ANALYSIS_BUILD_ROOT." >&2
     exit 1
