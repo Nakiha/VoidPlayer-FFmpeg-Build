@@ -9,6 +9,7 @@ on:
       - 'fixtures/**'
       - 'shared/vp_capabilities.c'
       - 'scripts/build-analysis.sh'
+      - 'scripts/preserve-pthread-url.py'
       - 'scripts/ffmpeg-wasm-revision'
       - 'scripts/build-quality-library.sh'
       - 'scripts/write-capabilities.mjs'
