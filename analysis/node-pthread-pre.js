@@ -1,5 +1,5 @@
-import { workerData } from 'node:worker_threads';
-
-// Use Emscripten's parentPort bridge for Node-compatible workers. Bun also
-// supplies a Web Worker postMessage, whose channel differs from parentPort.
-if (process.versions.bun && workerData === 'em-pthread') globalThis.postMessage = undefined;
+// Bun supplies both Web Worker and parentPort channels. Its pthreads must use parentPort.
+if (typeof process === 'object' && process.versions?.bun) {
+  const { workerData } = await import('node:worker_threads');
+  if (workerData === 'em-pthread') globalThis.postMessage = undefined;
+}

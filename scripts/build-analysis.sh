@@ -77,7 +77,7 @@ if [[ "$THREADING" == pthreads ]]; then
   emcc "-O$OPT" $CFLAGS -DVP_ANALYSIS_H264_SKIP_LOOP_FILTER="$H264_SKIP_LOOP_FILTER" -include "$BUILD/vp_core_build_id.h" \
     "$ROOT/analysis/stream.c" "$ROOT/shared/vp_capabilities.c" -DVP_NO_CONTAINER_DEMUX -I "$BUILD/source" -I "$BUILD/work" \
     libavcodec/libavcodec.a libavutil/libavutil.a -sDEFAULT_TO_CXX=1 \
-    -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=node -s ALLOW_MEMORY_GROWTH=1 -s FILESYSTEM=0 \
+    -s MODULARIZE=1 -s EXPORT_ES6=1 -s ENVIRONMENT=web,worker,node -s ALLOW_MEMORY_GROWTH=1 -s FILESYSTEM=0 \
     "-sPTHREAD_POOL_SIZE=Module['analysisThreads'] ?? 0" -s STACK_SIZE=4194304 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY="$HEAP_MAX" \
     -s EXPORTED_RUNTIME_METHODS='["HEAPU8","PThread"]' \
     -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_execution_abi","_vpa_execution_mode","_vpa_execution_path","_vpa_execution_reason","_vpa_execution_retry_code","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vp_capability_abi","_vp_build_id","_vp_demuxer_count","_vp_demuxer_name","_vp_decoder_count","_vp_decoder_name","_vpa_configure_threads"]' \
