@@ -180,6 +180,10 @@ int vpa_open(int codec,const uint8_t *extra,int size){
     decoder->thread_count=1;decoder->thread_type=0;decoder->pkt_timebase=(AVRational){1,1000000};
 #ifdef __EMSCRIPTEN_PTHREADS__
     if(id==AV_CODEC_ID_VVC)decoder->thread_count=decoder_threads;
+    if (id == AV_CODEC_ID_HEVC && decoder_threads > 1) {
+        decoder->thread_type = FF_THREAD_SLICE;
+        decoder->thread_count = decoder_threads;
+    }
     if(id==AV_CODEC_ID_H264&&frame_contexts>1){decoder->thread_count=frame_contexts;decoder->thread_type=FF_THREAD_FRAME;}
 #endif
     decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;decoder->err_recognition=AV_EF_EXPLODE|AV_EF_CAREFUL;
