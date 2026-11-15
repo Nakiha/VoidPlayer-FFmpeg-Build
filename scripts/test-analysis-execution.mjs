@@ -34,7 +34,17 @@ function changedParameterSet(source) {
  const nal=Buffer.from(parameterSet(source));
  // PPS starts with a six-bit parameter-set ID after the two-byte NAL header.
  // Change only that ID: a valid additional PPS leaves the full decode intact.
- if(source.codecName==='vvc')nal[2]^=4;
+ if(source.codecName==='vvc'){
+  // Changing the first byte can invalidate an existing 00 00 03 escape.
+  const rbsp=[];
+  for(let i=2,zeros=0;i<nal.length;i++){
+   const byte=nal[i];
+   if(zeros===2&&byte===3){zeros=0;continue;}
+   rbsp.push(byte);zeros=byte===0?zeros+1:0;
+  }
+  rbsp[0]^=4;
+  return Buffer.concat([nal.subarray(0,2),esc(rbsp)]);
+ }
  return nal;
 }
 const latePacket = source => Math.min(14, source.packets.length - 2);

@@ -347,7 +347,7 @@ commit rather than text substitutions against an older FFmpeg release.
 
 `WASM_OPT_LEVEL` (default `3`), `WASM_LINK_OPT_LEVEL` (default `2`) and
 `WASM_LTO` (default `0`) control playback experiments. Analysis supports
-`ANALYSIS_OPT_LEVEL` (default `3`) and `ANALYSIS_LTO` (default `0`). SIMD remains
+`ANALYSIS_OPT_LEVEL` (default `3`) and `ANALYSIS_LTO` (default `1`). SIMD remains
 enabled. Use separate build/output roots for comparisons; cached work with
 different source, compiler or optimization inputs is rejected. A cached FFmpeg
 checkout must match the requested source revision and have no tracked changes.
@@ -355,9 +355,8 @@ Generated manifests include optimization parameters.
 
 On macOS ARM64 / Node 24 / Emscripten 6.0.9, analysis `-Oz + LTO` cut raw WASM
 from 2.90 MB to 1.34 MB but increased HEVC/VVC target-picture latency by about
-44–48%. `-O3 + LTO` produced 3.29 MB with only small timing differences. Neither
-is enabled by default. These observations are workload-specific, not browser
-performance guarantees; rerun correctness and playback benchmarks before
+44–48%. `-O3 + LTO` produced 3.29 MB with only small timing differences. Those measurements used the earlier analysis-only tree. The unified
+release uses `-O3 + LTO` for block throughput; rerun correctness and playback benchmarks before
 changing defaults. HTTP precompression belongs to the consuming web server.
 
 Main10 uses the same execution ABI1 and retry contract under strict 10-bit

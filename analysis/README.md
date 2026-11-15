@@ -50,8 +50,8 @@ IDCT/SAO backend. Compiler `-msimd128` alone does not select that backend:
 FFmpeg's `--disable-asm` also disables architecture C intrinsics. Effective
 `ARCH_WASM=1` and `HAVE_SIMD128=1` are required, including cached builds. The cache
 signature includes the backend identity; old work directories fail explicitly
-and require a fresh `ANALYSIS_BUILD_ROOT`. O3, no LTO and single threading stay
-unchanged by this configuration fix.
+and require a fresh `ANALYSIS_BUILD_ROOT`. The unified builds use O3 and LTO for both thread variants. `ANALYSIS_LTO=0`
+selects the comparison build.
 
 The analysis-only PR check uses Emscripten 6.0.9 and Node 24, builds the exact PR
 head and base, and compares every output header/block/reference byte for synthetic

@@ -32,7 +32,7 @@ cp "$ROOT/analysis/voidplayer_block_sort.h" "$BUILD/source/libavcodec/voidplayer
 mkdir -p "$BUILD/work"
 cd "$BUILD/work"
 OPT="${ANALYSIS_OPT_LEVEL:-3}"
-LTO="${ANALYSIS_LTO:-0}"
+LTO="${ANALYSIS_LTO:-1}"
 [[ "$OPT" =~ ^(2|3|s|z)$ ]] || { echo 'Invalid ANALYSIS_OPT_LEVEL'; exit 1; }
 [[ "$LTO" =~ ^(0|1)$ ]] || { echo 'Invalid ANALYSIS_LTO'; exit 1; }
 HEVC_NO_PIXELS="${ANALYSIS_HEVC_NO_PIXELS:-1}"
@@ -82,13 +82,13 @@ if [[ "$THREADING" == pthreads ]]; then
     -s EXPORTED_RUNTIME_METHODS='["HEAPU8","PThread"]' \
     -s EXPORTED_FUNCTIONS='["_malloc","_free","_vpa_abi","_vpa_execution_abi","_vpa_execution_mode","_vpa_execution_path","_vpa_execution_reason","_vpa_execution_retry_code","_vpa_open","_vpa_feed","_vpa_drain","_vpa_step","_vpa_count","_vpa_blocks","_vpa_ordinal","_vpa_width","_vpa_height","_vpa_invalid","_vpa_depth","_vpa_pts","_vpa_take","_vpa_record_bytes","_vpa_close","_vpa_reference_abi","_vpa_ref_count","_vpa_refs","_vpa_refs_invalid","_vpa_picture_type","_vpa_poc","_vpa_feed_known","_vp_capability_abi","_vp_build_id","_vp_demuxer_count","_vp_demuxer_name","_vp_decoder_count","_vp_decoder_name","_vpa_configure_threads"]' \
     --extern-pre-js "$ROOT/analysis/node-pthread-pre.js" -o "$OUT/voidplayer-analysis-mt.js"
-  python3 - "$OUT" "$CORE_REV" "$REV" "$HEAP_MAX" <<'PYTHON'
+  python3 - "$OUT" "$CORE_REV" "$REV" "$HEAP_MAX" "$OPT" "$LTO" <<'PYTHON'
 import hashlib,json,pathlib,sys
-out,revision,ffmpeg,heap=sys.argv[1:]
+out,revision,ffmpeg,heap,opt,lto=sys.argv[1:]
 base=pathlib.Path(out)
 digest=hashlib.sha256((base/'voidplayer-analysis-mt.wasm').read_bytes()).hexdigest()
 (base/'threading.json').write_text(json.dumps({'abi':1,'revision':revision,'ffmpegRevision':ffmpeg,'buildId':revision+':mt-'+digest[:16],
-    'heapMaxBytes':int(heap),'maxThreads':4},indent=2)+'\n')
+    'heapMaxBytes':int(heap),'maxThreads':4,'optimization':{'compile':opt,'link':opt,'lto':lto=='1','simd':True}},indent=2)+'\n')
 PYTHON
   exit 0
 fi
