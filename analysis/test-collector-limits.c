@@ -90,6 +90,21 @@ int main(void) {
     assert(vpa_feed_known(NULL,1,0,0,3,2000000)==AVERROR(EINVAL));
     assert(vpa_feed_known(NULL,1,0,0,3,-1)==AVERROR(EINVAL));
     vpa_close();assert(allocated==0);checks++;
+#ifdef VP_PREDICTION_ABI
+    assert(vpa_prediction_abi()==1&&vpa_prediction_select(0,0)==AVERROR(EINVAL));
+    assert(vpa_prediction_select(VP_INTRA,1)==0&&vpa_open(2,NULL,0)==0);
+    assert(vpa_prediction_select(VP_INTER,0)==AVERROR(EBUSY));
+    assert(!ff_vp_wants_prediction(1,VP_INTRA)&&!ff_vp_wants_prediction(2,VP_INTER)&&ff_vp_wants_prediction(2,VP_INTRA));
+    value=info(2,16,16);put(&value,0);ready=&pictures[0];
+    VPIntraPrediction prediction={0};
+    for(unsigned i=0;i<PREDICTION_BYTE_LIMIT/sizeof(prediction);i++)ff_vp_write_prediction(2,&prediction);
+    assert(vpa_prediction_count()==(int)(PREDICTION_BYTE_LIMIT/sizeof(prediction))&&vpa_predictions());
+    assert(vpa_take(PREDICTION_BYTE_LIMIT)==AVERROR(ENOMEM));
+    ff_vp_write_prediction(2,&prediction);
+    assert(vpa_prediction_count()==AVERROR(ENOMEM)&&!vpa_predictions()&&!failure&&!vpa_invalid());
+    vpa_close();
+    assert(!vpa_record_bytes()&&!ff_vp_wants_prediction(2,VP_INTRA)&&vpa_prediction_count()==AVERROR(EINVAL));
+#endif
     printf("PASS collector: %u groups; peak record allocation %zu; retained 0; malformed/budget/seal checks\n",checks,peak);
     return 0;
 }

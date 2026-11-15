@@ -74,7 +74,7 @@ any record, retaining the original tie behavior. No allocation grows and record
 byte accounting is unchanged. Sorting finishes on the owner thread before
 publication, after the decoder has completed the picture's writes.
 
-`node scripts/test-analysis-sort.mjs BUILD_ROOT BASE_SOURCE REPORT_JSON` verifies
+`node scripts/test-analysis-sort.mjs BUILD_ROOT BASE_SOURCE REPORT_JSON BASE_BUILD_ROOT` verifies
 88398 generated record cases against actual native and Emscripten `qsort`, using
 ASan/UBSan for the native run. It includes exhaustive small tied inputs, arbitrary
 non-key fields, exact/insufficient scratch capacity, maximum counts/geometry,

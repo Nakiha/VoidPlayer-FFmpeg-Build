@@ -77,7 +77,7 @@ jobs:
       - name: Verify direct XPSNR against pinned independent official clips
         run: node scripts/test-analysis-xpsnr.mjs "$RUNNER_TEMP/candidate"
       - name: Verify sort ties, boundaries, collector budgets and cancellation
-        run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json"
+        run: node scripts/test-analysis-sort.mjs "$RUNNER_TEMP/analysis-wasm-simd-v1" "$RUNNER_TEMP/baseline-source" "$RUNNER_TEMP/evidence/block-sort.json" "$RUNNER_TEMP/analysis-base"
       - name: Build threaded analysis and verify concurrent record ownership
         run: |
           ANALYSIS_BUILD_ROOT="$RUNNER_TEMP/analysis-mt" ANALYSIS_DIST_ROOT="$RUNNER_TEMP/candidate" \

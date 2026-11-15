@@ -8,8 +8,8 @@ import path from 'node:path';
 import {Worker} from 'node:worker_threads';
 
 const root=path.resolve(import.meta.dirname,'..');
-const [buildArg,baseArg,reportArg]=process.argv.slice(2);
-assert.ok(buildArg&&baseArg&&reportArg,'Pass analysis build root, fixed PR-base source and report.json');
+const [buildArg,baseArg,reportArg,baseBuildArg]=process.argv.slice(2);
+assert.ok(buildArg&&baseArg&&reportArg&&baseBuildArg,'Pass candidate build root, fixed PR-base source, report.json and PR-base build root');
 const build=path.resolve(buildArg),baseline=path.resolve(baseArg),reportFile=path.resolve(reportArg);
 // Compiled test executables are temporary, outside the uploaded evidence tree.
 const output=path.join(path.dirname(path.dirname(reportFile)),'analysis-sort-test-build');
@@ -42,12 +42,14 @@ const wasmLog=await main(sortFile,'wasm-sort');assert.match(wasmLog,/88398 byte-
 assert.deepEqual(shuffles(wasmLog),shuffles(nativeLog),'WASM O3 replays the same seeded maximum permutations');
 report.maximumShuffleEvidence=shuffles(wasmLog);
 report.checks.push({name:'Emscripten-libc-byte-exact-sort',optimization:'O3',simd128:true,cases:88398,wasmSha256:await hash(path.join(output,'sort-tests.wasm'))});
-const includes=['-I',path.join(build,'source'),'-I',path.join(build,'work')];
-const archives=[path.join(build,'work/libavcodec/libavcodec.a'),path.join(build,'work/libavutil/libavutil.a')];
 const collectorResults={};
-for(const [label,collector] of [['baseline',path.join(baseline,'analysis/stream.c')],['candidate',path.join(root,'analysis/stream.c')]]){
+for(const [label,sourceRoot,buildRoot] of [['baseline',baseline,path.resolve(baseBuildArg)],['candidate',root,build]]){
+ const collector=path.join(sourceRoot,'analysis/stream.c');
+ const includes=['-I',path.join(buildRoot,'source'),'-I',path.join(buildRoot,'work')];
+ const archives=['libavcodec/libavcodec.a','libavutil/libavutil.a'].map(file=>path.join(buildRoot,'work',file));
+ const defines=(await readFile(path.join(buildRoot,'work/.analysis-build-signature'),'utf8')).includes(':prediction=1:')?['-DVP_PREDICTION_ABI=1']:[];
  const file=path.join(output,'collector-'+label+'.mjs');
- run('emcc',[path.join(root,'analysis/test-collector-limits.c'),`-DVPA_TEST_COLLECTOR=${JSON.stringify(collector)}`,...includes,...archives,...flags,'-Wl,--wrap=avcodec_receive_frame','-sEXPORTED_FUNCTIONS=["_main"]','-o',file]);
+ run('emcc',[path.join(root,'analysis/test-collector-limits.c'),`-DVPA_TEST_COLLECTOR=${JSON.stringify(collector)}`,...defines,...includes,...archives,...flags,'-Wl,--wrap=avcodec_receive_frame','-sEXPORTED_FUNCTIONS=["_main"]','-o',file]);
  collectorResults[label]=await main(file,'collector-'+label);
  report.checks.push({name:'actual-collector-'+label,optimization:'O3',simd128:true,result:collectorResults[label]});
 }
