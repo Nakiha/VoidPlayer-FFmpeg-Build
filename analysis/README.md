@@ -192,7 +192,7 @@ uniqueness. Sorting reuses spare record tail or at most 72 KiB of the existing
 4 MiB stack. Duplicate/unsupported keys reach libc qsort before any record moves,
 so ties keep the original libc behavior and no second record buffer is created.
 
-The threaded artifact supports VVC internal workers and H264 frame threads.
+The threaded artifact runs in Node, Bun and cross-origin isolated browser workers. Browser hosts without shared memory use the single-thread artifact. The threaded artifact supports VVC internal workers and H264 frame threads.
 H264 uses the configured frame-context count, bounded by the worker budget; its
 frame/slice identities still come from COPY_OPAQUE. HEVC retains its admitted
 single-thread no-pixels path. Thread settings reserve upper bounds, not a promise
