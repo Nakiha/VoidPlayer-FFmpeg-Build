@@ -140,6 +140,13 @@ int ff_vp_wants_prediction(uintptr_t id, int product)
 {
     return product == prediction_product && id == prediction_id;
 }
+void ff_vp_prediction_unsupported(uintptr_t id)
+{
+    Picture *p = acquire_picture(id);
+    if (!p) return;
+    p->predictions.status = AVERROR(ENOSYS);
+    UNLOCK_PICTURE(p);
+}
 void ff_vp_write_prediction(uintptr_t id, const void *record)
 {
     Picture *p = acquire_picture(id);

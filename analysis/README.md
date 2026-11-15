@@ -1,7 +1,7 @@
 # Independent bitstream analysis core (ABI 1)
 
 `bash scripts/build-analysis.sh` builds single-threaded `voidplayer-analysis.js`
-and `.wasm` from the shared FFmpeg revision in `scripts/ffmpeg-wasm-revision` with `--enable-voidplayer-analysis`.
+and `.wasm` from the analysis FFmpeg revision in `scripts/ffmpeg-analysis-revision` with `--enable-voidplayer-analysis`.
 The playback build and its collection settings do not change. License: LGPL-2.1-or-later.
 Build patches and collector live here; the Web repository only consumes the result.
 
@@ -205,3 +205,9 @@ anchors and missing references. A frame-thread error can surface on a later
 feed/receive call; that observing operation is not presented as the corrupt
 source AU. Concurrent record-byte snapshots are checked against the hard budget,
 not treated as deterministic picture content. Test workers are physically joined.
+
+## Prediction ABI 1
+
+Before open, call `vpa_prediction_select(product, source_au)` with 1 for intra or 2 for inter. Selection covers one stable decode-order AU. Use full execution for VVC inter. AVC supports only intra. Once the target picture is ready, `vpa_prediction_count()` returns a nonnegative count, ENOSYS for an unsupported layout, or ENOMEM for an exceeded budget. Copy `vpa_predictions()` before take or close. Both exports require the selected AU. Close resets the selection and frees records after joining decoder threads. Unselected pictures allocate no prediction records.
+
+The wire structures in the pinned FFmpeg `libavcodec/voidplayer_prediction.h` are little endian, 16 bytes for intra and 32 for inter. Coordinates are in coded luma samples. Component mask 1 is Y, 6 is shared Cb/Cr. Intra records distinguish predictor family, normalized final mode and syntax selection, including the DM selector and CCLM index. HEVC motion is signed quarter-luma samples and reference identities are source AU ordinals. VVC inter returns tool flags and model, with no list vectors. Outputs support progressive 4:2:0 at 8 or 10 bits and are capped at 2 MiB per requested picture within the global collector budget. Record order is deterministic across thread counts.

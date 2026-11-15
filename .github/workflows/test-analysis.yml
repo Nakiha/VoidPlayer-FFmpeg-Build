@@ -10,7 +10,7 @@ on:
       - 'shared/vp_capabilities.c'
       - 'scripts/build-analysis.sh'
       - 'scripts/preserve-pthread-url.py'
-      - 'scripts/ffmpeg-wasm-revision'
+      - 'scripts/ffmpeg-analysis-revision'
       - 'scripts/build-quality-library.sh'
       - 'scripts/write-capabilities.mjs'
       - 'scripts/test-analysis-*.mjs'
@@ -65,7 +65,9 @@ jobs:
           cp "$RUNNER_TEMP/baseline/capabilities.json" "$RUNNER_TEMP/evidence/baseline-capabilities.json"
           # Pin the baseline expectation to the base branch's declared revision
           # instead of the test's fallback literal, which goes stale on pin bumps.
-          if test -f "$RUNNER_TEMP/baseline-source/scripts/ffmpeg-wasm-revision"; then
+          if test -f "$RUNNER_TEMP/baseline-source/scripts/ffmpeg-analysis-revision"; then
+            echo "BASELINE_FFMPEG_REVISION=$(cat "$RUNNER_TEMP/baseline-source/scripts/ffmpeg-analysis-revision")" >> "$GITHUB_ENV"
+          elif test -f "$RUNNER_TEMP/baseline-source/scripts/ffmpeg-wasm-revision"; then
             echo "BASELINE_FFMPEG_REVISION=$(cat "$RUNNER_TEMP/baseline-source/scripts/ffmpeg-wasm-revision")" >> "$GITHUB_ENV"
           else
             echo "BASELINE_FFMPEG_REVISION=$(sed -n 's/^REV=\([a-f0-9]\{40\}\)$/\1/p' "$RUNNER_TEMP/baseline-source/scripts/build-analysis.sh")" >> "$GITHUB_ENV"
