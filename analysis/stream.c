@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "voidplayer_block_sort.h"
+#include "libavcodec/voidplayer_prediction.h"
 #include "libavcodec/avcodec.h"
 #include "libavcodec/voidplayer_vachunk.h"
 #include "libavcodec/voidplayer_analysis.h"
@@ -33,7 +34,17 @@ int vpa_execution_abi(void); int vpa_execution_mode(int mode); int vpa_execution
 #ifndef VP_ANALYSIS_H264_SKIP_LOOP_FILTER
 #define VP_ANALYSIS_H264_SKIP_LOOP_FILTER 1
 #endif
-typedef struct { uintptr_t id; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; uint32_t refs[128], ref_count; int refs_invalid, type, poc; } Picture;
+/* Only the selected source AU owns prediction bytes. Selection is immutable
+ * between open and the completion of avcodec_free_context (which joins workers). */
+static uintptr_t prediction_id;
+static int prediction_product, prediction_stride;
+#define PREDICTION_BYTE_LIMIT (2 * 1024 * 1024)
+int vpa_prediction_abi(void);
+int vpa_prediction_select(int product, int au);
+int vpa_prediction_count(void);
+intptr_t vpa_predictions(void);
+typedef struct { uint8_t *rows; uint32_t count, capacity; int status; } PredictionRows;
+typedef struct { uintptr_t id; PredictionRows predictions; Block *blocks; uint32_t count,capacity,width,height; int sealed,invalid,depth; int64_t pts; uint32_t refs[128], ref_count; int refs_invalid, type, poc; } Picture;
 static Picture pictures[MAX_PICTURES];
 static AVCodecContext *decoder;
 static AVFrame *frame;
@@ -81,7 +92,7 @@ static Picture *find(uintptr_t id,int create) {
     if(create) for(int i=0;i<MAX_PICTURES;i++) if(!pictures[i].id) { LOCK_PICTURE(&pictures[i]); pictures[i].id=id; UNLOCK_PICTURE(&pictures[i]); return &pictures[i]; }
     failure=AVERROR(ENOMEM); return NULL;
 }
-static void release(Picture *p) { if(!p)return; allocated-=p->capacity*sizeof(Block);free(p->blocks);memset(p,0,sizeof(*p)); }
+static void release(Picture *p) { if(!p)return; allocated-=p->capacity*sizeof(Block)+p->predictions.capacity*prediction_stride;free(p->predictions.rows);free(p->blocks);memset(p,0,sizeof(*p)); }
 static Picture *acquire_picture(uintptr_t id) {
     if(!decoder||failure)return NULL;
     if(!id){failure=AVERROR_INVALIDDATA;return NULL;}
@@ -114,6 +125,62 @@ static int reserve_records(size_t extra) {
     allocated+=extra;
 #endif
     return 1;
+}
+int vpa_prediction_abi(void) { return 1; }
+int vpa_prediction_select(int product, int au)
+{
+    if (decoder) return AVERROR(EBUSY);
+    if ((product != VP_INTRA && product != VP_INTER) || au < 0 || au >= 2000000) return AVERROR(EINVAL);
+    prediction_product = product;
+    prediction_id = (uintptr_t)au + 1;
+    prediction_stride = product == VP_INTRA ? sizeof(VPIntraPrediction) : sizeof(VPInterPrediction);
+    return 0;
+}
+int ff_vp_wants_prediction(uintptr_t id, int product)
+{
+    return product == prediction_product && id == prediction_id;
+}
+void ff_vp_write_prediction(uintptr_t id, const void *record)
+{
+    Picture *p = acquire_picture(id);
+    if (!p) return;
+    PredictionRows *r = &p->predictions;
+    if (p->sealed) r->status = AVERROR_INVALIDDATA;
+    if (!r->status && r->count == r->capacity) {
+        unsigned capacity = r->capacity ? r->capacity * 2 : 256;
+        size_t extra = (capacity - r->capacity) * prediction_stride;
+        if (capacity * prediction_stride > PREDICTION_BYTE_LIMIT || !reserve_records(extra)) {
+            r->status = AVERROR(ENOMEM);
+        } else {
+            uint8_t *rows = realloc(r->rows, capacity * prediction_stride);
+            if (rows) {
+                r->rows = rows;
+                r->capacity = capacity;
+            } else {
+                allocated -= extra;
+                r->status = AVERROR(ENOMEM);
+            }
+        }
+    }
+    if (!r->status) {
+        memcpy(r->rows + r->count * prediction_stride, record, prediction_stride);
+        r->count++;
+    }
+    UNLOCK_PICTURE(p);
+}
+static int prediction_order(const void *left, const void *right)
+{
+    /* Total byte order is independent of decoder task scheduling. */
+    return memcmp(left, right, prediction_stride);
+}
+int vpa_prediction_count(void)
+{
+    if (!ready || !prediction_id || ready->id != prediction_id) return AVERROR(EINVAL);
+    return ready->predictions.status ? ready->predictions.status : (int)ready->predictions.count;
+}
+intptr_t vpa_predictions(void)
+{
+    return vpa_prediction_count() > 0 ? (intptr_t)ready->predictions.rows : 0;
 }
 static void append_locked(Picture *p,const VoidPlayerVachunkFrameInfo *info,uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint8_t qp,uint8_t mode,uint8_t depth) {
     if(!decoder||failure)return;
@@ -161,7 +228,7 @@ int ff_voidplayer_vachunk_write_frame_summary(const VoidPlayerVachunkFrameInfo *
 uint32_t ff_voidplayer_vachunk_frame_count(void){return 0;}
 uint32_t ff_voidplayer_vachunk_last_frame_cu_count(void){return 0;}
 int vpa_abi(void){return 1;}
-void vpa_close(void){AVCodecContext *closing=decoder;avcodec_free_context(&closing);decoder=NULL;ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);failure=0;execution_mode=0;}
+void vpa_close(void){AVCodecContext *closing=decoder;avcodec_free_context(&closing);decoder=NULL;ready=NULL;for(int i=0;i<MAX_PICTURES;i++)release(&pictures[i]);av_frame_free(&frame);failure=0;execution_mode=0;prediction_product=0;prediction_id=0;prediction_stride=0;}
 int vpa_execution_abi(void){return 1;}
 int vpa_execution_retry_code(void){return VP_ANALYSIS_RETRY_FULL;}
 int vpa_execution_mode(int mode){if(decoder)return AVERROR(EBUSY);if(mode<0||mode>1)return AVERROR(EINVAL);execution_mode=mode;return 0;}
@@ -173,6 +240,7 @@ int vpa_open(int codec,const uint8_t *extra,int size){
 #ifdef __EMSCRIPTEN_PTHREADS__
     pthread_once(&locks_once,init_picture_locks);
 #endif
+    if (prediction_product == VP_INTER && (codec == 1 || (codec == 3 && execution_mode))) return AVERROR(ENOSYS);
     if(size<0||size>1024*1024)return AVERROR(EINVAL);
     enum AVCodecID id=codec==1?AV_CODEC_ID_H264:codec==2?AV_CODEC_ID_HEVC:codec==3?AV_CODEC_ID_VVC:AV_CODEC_ID_NONE;
     const AVCodec *c=avcodec_find_decoder(id);if(!c)return AVERROR_DECODER_NOT_FOUND;
@@ -234,6 +302,13 @@ int vpa_step(void){
     const AVPixFmtDescriptor *fmt=av_pix_fmt_desc_get(frame->format);
     p->invalid|=frame->decode_error_flags!=0||(frame->flags&AV_FRAME_FLAG_CORRUPT)||(frame->flags&AV_FRAME_FLAG_INTERLACED)||!fmt;
     p->depth=fmt?fmt->comp[0].depth:0;
+    if (p->id == prediction_id) {
+        if (p->invalid || !fmt || fmt->nb_components != 3 || fmt->log2_chroma_w != 1 || fmt->log2_chroma_h != 1 ||
+            (p->depth != 8 && p->depth != 10))
+            p->predictions.status = AVERROR(ENOSYS);
+        if (!p->predictions.status && p->predictions.count > 1)
+            qsort(p->predictions.rows, p->predictions.count, prediction_stride, prediction_order);
+    }
     p->sealed=1;p->pts=frame->pts;
     UNLOCK_PICTURE(p);
     UNLOCK_COLLECTOR();
@@ -248,5 +323,5 @@ int vpa_height(void){return ready?ready->height:0;}
 int vpa_depth(void){return ready?ready->depth:0;}
 int vpa_invalid(void){return !ready||ready->invalid||!ready->count;}
 double vpa_pts(void){return ready?(double)ready->pts:0;}
-int vpa_take(int maxBytes){if(!ready)return 0;if(maxBytes<0||ready->count*sizeof(Block)>(unsigned)maxBytes)return AVERROR(ENOMEM);int count=ready->count;LOCK_COLLECTOR();LOCK_PICTURE(ready);release(ready);UNLOCK_PICTURE(ready);ready=NULL;UNLOCK_COLLECTOR();return count;}
+int vpa_take(int maxBytes){if(!ready)return 0;if(maxBytes<0||ready->count*sizeof(Block)+ready->predictions.count*prediction_stride>(unsigned)maxBytes)return AVERROR(ENOMEM);int count=ready->count;LOCK_COLLECTOR();LOCK_PICTURE(ready);release(ready);UNLOCK_PICTURE(ready);ready=NULL;UNLOCK_COLLECTOR();return count;}
 int vpa_record_bytes(void){LOCK_COLLECTOR();int bytes=allocated;UNLOCK_COLLECTOR();return bytes;}
