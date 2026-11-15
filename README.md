@@ -128,8 +128,7 @@ Prerequisites: an Emscripten SDK with `emcc` on `PATH`, or a checkout under
 ```bash
 bash scripts/build-wasm.sh                # pinned unified Nakiha/FFmpeg revision
 bash scripts/build-wasm.sh --mt           # multi-threaded variant (pthreads)
-bash scripts/build-wasm.sh --ffmpeg-ref n8.1
-node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-n9.0.2 [sample ...]
+node scripts/test-wasm-node.cjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified [sample ...]
 ```
 
 Both ST and MT select FFmpeg's `wasm32` architecture with asm enabled, so the
@@ -336,7 +335,7 @@ pixel bytes, including raw YUV planes.
 
 One demux scan records every selected video packet, including packets without PTS. Exported records retain the original packet ordinal at byte 40; records with PTS are presentation-sorted, and missing-PTS records follow them. Playback consumes the timestamped view; analysis retains packet identities and bytes across sorting and cache import. Stream ABI v2 watermarks describe the last known PTS, including batches containing only untimed packets. `vp_index_scan_decoded_packets` is zero for demux-only scans; decoder-backed prefix scanning remains an explicit diagnostic mode. Old ABI v2 caches must be rebuilt.
 
-HDR resources tagged BT.2020 NCL with PQ/HLG and at least 10-bit depth retain original integer YUV samples in frame ABI v2. The core performs no HDR tone mapping; the web presenter owns the display transform. `node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-n9.0.2/voidplayer-core.js` checks PQ/HLG metadata, exact samples against independent FFmpeg, and seeking; run again with the multithreaded glue.
+HDR resources tagged BT.2020 NCL with PQ/HLG and at least 10-bit depth retain original integer YUV samples in frame ABI v2. The core performs no HDR tone mapping; the web presenter owns the display transform. `node scripts/test-hdr-planes.mjs dist/voidplayer-ffmpeg-wasm-wasm-n9.0.2-unified/voidplayer-core.js` checks PQ/HLG metadata, exact samples against independent FFmpeg, and seeking; run again with the multithreaded glue.
 
 ### WASM refresh and optimization experiments
 

@@ -139,6 +139,11 @@ if [ "$WASM_LTO" = 1 ]; then SIMD_CFLAGS="$SIMD_CFLAGS -flto"; fi
 SIMD_ARGS=("--extra-cflags=$SIMD_CFLAGS" "--extra-ldflags=$SIMD_CFLAGS" "--optflags=-O$WASM_OPT_LEVEL")
 SIGNATURE="$EXPECTED_REV:arch=wasm32:asm=1:ffmpeg-simd128=$WASM_SIMD:mt=$MT:demux=$DEMUXERS:decoders=$DECODERS,libdav1d:parsers=$PARSERS:$WASM_OPT_LEVEL:$WASM_LINK_OPT_LEVEL:$WASM_LTO:$SIMD_CFLAGS:$(emcc --version | head -1)"
 
+ANALYSIS_CONFIG=(--disable-voidplayer-analysis)
+if [[ "$SOURCE_REF" == "$FFMPEG_REF" ]] && ! grep -qs -- '--enable-voidplayer-analysis' "$FFMPEG_SOURCE/configure"; then
+    [[ ! -e "$FFMPEG_SOURCE/libavcodec/voidplayer_vachunk.h" ]] || die "Legacy instrumented FFmpeg cannot disable analysis hooks"
+    ANALYSIS_CONFIG=()
+fi
 verify_wasm_backend() {
     local config="$1" feature expected
     # --disable-asm silently reduces even --arch=wasm32 to ARCH_WASM=0.
@@ -147,7 +152,10 @@ verify_wasm_backend() {
     for feature in ARCH_WASM HAVE_SIMD128 CONFIG_VOIDPLAYER_ANALYSIS; do
         expected=1
         if [ "$feature" = HAVE_SIMD128 ]; then expected="$WASM_SIMD"; fi
-        if [ "$feature" = CONFIG_VOIDPLAYER_ANALYSIS ]; then expected=0; fi
+        if [ "$feature" = CONFIG_VOIDPLAYER_ANALYSIS ]; then
+            [[ ${#ANALYSIS_CONFIG[@]} != 0 ]] || continue
+            expected=0
+        fi
         grep -Eq "^#define $feature $expected$" "$config" || \
             die "Playback backend requires $feature=$expected; use a fresh --build-root"
     done
@@ -175,7 +183,7 @@ DECODERS="$DECODERS libdav1d"
 
 FFMPEG_ARGS=(
     "--prefix=$FFMPEG_INSTALL"
-    "--disable-voidplayer-analysis"
+    ${ANALYSIS_CONFIG[@]+"${ANALYSIS_CONFIG[@]}"}
     "--cc=emcc"
     "--cxx=em++"
     "--ar=emar"

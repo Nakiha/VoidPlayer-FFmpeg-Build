@@ -12,6 +12,6 @@ try{
  writeFileSync(signature,originalSignature.replace(':arch=wasm32:ffmpeg-simd128=1',''));rejects(/inputs changed/);
  writeFileSync(signature,originalSignature.replace(/:execution=1:hevc-no-pixels=[01]/,''));rejects(/inputs changed/);
  writeFileSync(signature,originalSignature);
- for(const macro of ['ARCH_WASM','HAVE_SIMD128']){assert.ok(originalConfig.includes(`#define ${macro} 1`));writeFileSync(config,originalConfig.replace(`#define ${macro} 1`,`#define ${macro} 0`));rejects(new RegExp(`backend missing ${macro}`));writeFileSync(config,originalConfig);}
- console.log('PASS old cache signature and both missing backend macros fail before compilation');
+ for(const macro of ['ARCH_WASM','HAVE_SIMD128','CONFIG_VOIDPLAYER_ANALYSIS']){assert.ok(originalConfig.includes(`#define ${macro} 1`));writeFileSync(config,originalConfig.replace(`#define ${macro} 1`,`#define ${macro} 0`));rejects(new RegExp(`backend missing ${macro}`));writeFileSync(config,originalConfig);}
+ console.log('PASS old cache signature and incorrect backend or analysis configuration fail before compilation');
 }finally{writeFileSync(config,originalConfig);writeFileSync(signature,originalSignature);rmSync(temp,{recursive:true,force:true});}
