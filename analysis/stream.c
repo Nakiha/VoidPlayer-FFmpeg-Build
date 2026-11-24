@@ -271,6 +271,9 @@ int vpa_open(int codec,const uint8_t *extra,int size){
 #endif
     decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;decoder->err_recognition=AV_EF_EXPLODE|AV_EF_CAREFUL;
     decoder->max_pixels=4096*2304;
+    /* Packet-only AVC lacks the demuxer's reorder hint. Use the SPS/level DPB
+     * bound from the start so a fresh GOP cannot output before earlier B frames. */
+    if (id == AV_CODEC_ID_H264) decoder->strict_std_compliance = FF_COMPLIANCE_STRICT;
 #if VP_ANALYSIS_H264_SKIP_LOOP_FILTER
     /* The H264 analysis hook already omits macroblock pixel reconstruction.
      * Use the decoder's existing discard path: it preserves syntax/state,
