@@ -16,7 +16,7 @@ static void *collect(void *opaque) {
         info.width=4096;info.height=2304;
         for(unsigned i=0;i<work->count&&!failure;i++) {
             const unsigned key=i+(work->shared?work->lane*work->count:0);
-            ff_voidplayer_vachunk_write_intra_cu(&info,(key%1024)*4,(key/1024)*4,4,4,0,key%52,0,0,0,0);
+            ff_voidplayer_vachunk_write_intra_cu(&info,(key%1024)*4,(key/1024)*4,4,4,0,key%52,0,0,0,key*17u);
             size_t bytes=atomic_load(&allocated),old=atomic_load(&peak);
             assert(bytes<=MAX_RECORD_BYTES);
             while(old<bytes&&!atomic_compare_exchange_weak(&peak,&old,bytes)){}
@@ -54,7 +54,7 @@ int main(void) {
         run(2,1,20000,1);assert(!failure&&pictures[0].count==40000&&pictures[0].ref_count==2);
         Picture *p=&pictures[0];
         assert(vpa_block_sort(p->blocks,p->count,p->capacity,4096,2304)==0);
-        for(unsigned i=0;i<p->count;i++)assert(p->blocks[i].x==(i%1024)*4&&p->blocks[i].y==(i/1024)*4&&p->blocks[i].qp==i%52);
+        for(unsigned i=0;i<p->count;i++)assert(p->blocks[i].x==(i%1024)*4&&p->blocks[i].y==(i/1024)*4&&p->blocks[i].qp==i%52&&p->blocks[i].bits==i*17u);
         ready=p;p->sealed=1;assert(vpa_take(40000*12)==40000&&allocated==0);
         reset();
         run(4,8,MAX_BLOCKS,0);assert(failure==AVERROR(ENOMEM));

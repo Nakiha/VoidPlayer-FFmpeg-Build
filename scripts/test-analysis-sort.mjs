@@ -44,16 +44,18 @@ report.maximumShuffleEvidence=shuffles(wasmLog);
 report.checks.push({name:'Emscripten-libc-byte-exact-sort',optimization:'O3',simd128:true,cases:88398,wasmSha256:await hash(path.join(output,'sort-tests.wasm'))});
 const collectorResults={};
 for(const [label,sourceRoot,buildRoot] of [['baseline',baseline,path.resolve(baseBuildArg)],['candidate',root,build]]){
- const collector=path.join(sourceRoot,'analysis/stream.c');
+ const collectorTest=path.join(sourceRoot,'analysis/test-collector-limits.c');
  const includes=['-I',path.join(buildRoot,'source'),'-I',path.join(buildRoot,'work')];
  const archives=['libavcodec/libavcodec.a','libavutil/libavutil.a'].map(file=>path.join(buildRoot,'work',file));
  const defines=(await readFile(path.join(buildRoot,'work/.analysis-build-signature'),'utf8')).includes(':prediction=1:')?['-DVP_PREDICTION_ABI=1']:[];
  const file=path.join(output,'collector-'+label+'.mjs');
- run('emcc',[path.join(root,'analysis/test-collector-limits.c'),`-DVPA_TEST_COLLECTOR=${JSON.stringify(collector)}`,...defines,...includes,...archives,...flags,'-Wl,--wrap=avcodec_receive_frame','-sEXPORTED_FUNCTIONS=["_main"]','-o',file]);
+ run('emcc',[collectorTest,...defines,...includes,...archives,...flags,'-Wl,--wrap=avcodec_receive_frame','-sEXPORTED_FUNCTIONS=["_main"]','-o',file]);
  collectorResults[label]=await main(file,'collector-'+label);
  report.checks.push({name:'actual-collector-'+label,optimization:'O3',simd128:true,result:collectorResults[label]});
 }
-assert.equal(collectorResults.baseline,collectorResults.candidate,'identical collector budget/retention behavior');
+// The optional ABI changes the record stride. Each revision exercises its own
+// hard ceiling and verifies that no bytes are retained after release.
+for(const result of Object.values(collectorResults))assert.match(result,/retained 0; malformed\/budget\/seal checks/);
 // Terminate an owned worker after maximum-size uniqueness validation. C remains
 // synchronous. This proves neither an interrupt inside C nor a production
 // cancellation-latency bound; the startup watchdog is only a test timeout.

@@ -18,7 +18,7 @@ static uint32_t next_random32(uint32_t *state) { *state^=*state<<13;*state^=*sta
 static uint32_t random32(void) { return next_random32(&random_state); }
 static void checked_qsort(void *base,size_t n,size_t width,int (*cmp)(const void *,const void *)) {
     /* A tie fallback must see the untouched original, not a sorted permutation. */
-    assert(width==12&&memcmp(base,original,n*width)==0);calls++;
+    assert(width==sizeof(Block)&&memcmp(base,original,n*width)==0);calls++;
     qsort(base,n,width,cmp);
 }
 static void check(Block *input,uint32_t n,uint32_t capacity,uint32_t w,uint32_t h,int fallback) {
@@ -37,7 +37,7 @@ static void check(Block *input,uint32_t n,uint32_t capacity,uint32_t w,uint32_t 
 }
 static Block record(uint32_t key,uint32_t serial) {
     return (Block){(key%1024)*4,(key/1024)*4,(serial%255)+1,((serial*13)%255)+1,
-                   (int16_t)(serial*7919),serial*17,serial*31};
+                   (int16_t)(serial*7919),serial*17,serial*31,serial*31337u};
 }
 static void shuffle_maximum(Block *blocks,uint32_t n) {
     /* Independent of earlier fuzz consumption; both maximum-size variants
@@ -87,7 +87,7 @@ void vpa_sort_cancel_work(void) {
 }
 #endif
 int main(void) {
-    assert(sizeof(Block)==12&&offsetof(Block,qp)==8&&offsetof(Block,mode)==10&&offsetof(Block,depth)==11);
+    assert(sizeof(Block)==16&&offsetof(Block,bits)==12&&offsetof(Block,qp)==8&&offsetof(Block,mode)==10&&offsetof(Block,depth)==11);
     Block tiny[8];
     check(tiny,0,0,0,0,0);
     tiny[0]=(Block){65535,65535,65535,65535,INT16_MIN,255,255};check(tiny,1,1,0,0,0);

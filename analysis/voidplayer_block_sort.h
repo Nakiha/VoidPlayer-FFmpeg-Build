@@ -1,4 +1,4 @@
-/* LGPL-2.1-or-later. Internal specialization of the 12-byte analysis records. */
+/* LGPL-2.1-or-later. Sort analysis records with their attributed bit counts. */
 #ifndef VOIDPLAYER_BLOCK_SORT_H
 #define VOIDPLAYER_BLOCK_SORT_H
 #include <stdint.h>
@@ -7,8 +7,9 @@
 #include <string.h>
 
 #define VPA_BLOCK_LIMIT 131072u
-typedef struct { uint16_t x,y,w,h; int16_t qp; uint8_t mode,depth; } Block;
-_Static_assert(sizeof(Block)==12, "analysis block ABI must remain 12 bytes");
+typedef struct { uint16_t x,y,w,h; int16_t qp; uint8_t mode,depth; uint32_t bits; } Block;
+#define VPA_BASE_BLOCK_BYTES 12
+_Static_assert(offsetof(Block,bits)==VPA_BASE_BLOCK_BYTES && sizeof(Block)==16, "unexpected analysis block layout");
 
 #ifndef VPA_BLOCK_QSORT
 #define VPA_BLOCK_QSORT qsort
@@ -43,7 +44,7 @@ static void vpa_block_radix(Block *blocks,uint32_t n,unsigned shift) {
     if(shift)for(unsigned b=0;b<256;b++)if(count[b]>1)vpa_block_radix(blocks+start[b],count[b],shift-8);
 }
 
-/* No heap allocation, ABI change or second record buffer. Strictly sorted
+/* No heap allocation or second record buffer. Strictly sorted
  * keys already have the unique qsort order. Otherwise prove key uniqueness
  * before moving a record, using unused allocation tail or at most 72 KiB of
  * the existing 4 MiB stack. Invalid geometry/keys and duplicate keys call libc
